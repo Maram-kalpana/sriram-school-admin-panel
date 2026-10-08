@@ -8,6 +8,9 @@ import Login from './pages/Login'
 import ChangePassword from './pages/ChangePassword'
 import Placeholder from './pages/Placeholder'
 import Students from './pages/Students'
+import Categories from './pages/Categories'
+import Products from './pages/Products'
+import ProductForm from './pages/ProductForm'
 
 export default function App() {
   return (
@@ -27,8 +30,10 @@ export default function App() {
               }
             />
             <Route path="students" element={<Students />} />
-            <Route path="products" element={<Placeholder title="Products" />} />
-            <Route path="categories" element={<Placeholder title="Categories" />} />
+            <Route path="products" element={<Products />} />
+            <Route path="products/new" element={<ProductForm />} />
+            <Route path="products/:id" element={<ProductForm />} />
+            <Route path="categories" element={<Categories />} />
             <Route path="inventory" element={<Placeholder title="Inventory" />} />
             <Route path="kit" element={<Placeholder title="Kit" />} />
             <Route path="orders" element={<Placeholder title="Orders" />} />

@@ -9,6 +9,8 @@ const auth = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
 const authRoutes = require('./routes/auth');
 const studentsRoutes = require('./routes/students');
+const categoriesRoutes = require('./routes/categories');
+const productsRoutes = require('./routes/products');
 
 const app = express();
 
@@ -37,6 +39,8 @@ app.use('/api/auth', authRoutes);
 
 app.use('/api/admin', auth);
 app.use('/api/admin/students', studentsRoutes);
+app.use('/api/admin/categories', categoriesRoutes);
+app.use('/api/admin/products', productsRoutes);
 
 app.use('/api/admin', (req, res) => {
   res.status(404).json({ success: false, message: 'Admin route not found' });
