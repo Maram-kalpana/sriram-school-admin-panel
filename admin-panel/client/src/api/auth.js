@@ -14,11 +14,3 @@ export async function fetchMe() {
   const { data } = await api.get('/auth/me')
   return data
 }
-
-export async function changePassword(currentPassword, newPassword) {
-  const { data } = await api.post('/auth/change-password', {
-    currentPassword,
-    newPassword,
-  })
-  return data
-}

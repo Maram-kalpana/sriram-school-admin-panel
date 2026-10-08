@@ -348,9 +348,6 @@ async function updateProduct(req, res, next) {
 
 async function deleteProduct(req, res, next) {
   try {
-    if (req.admin.role !== 'super_admin') {
-      throw new AppError('Only super admins can delete products', 403);
-    }
     const product = await db('products').where({ id: req.params.id }).first();
     if (!product) throw new AppError('Product not found', 404);
     const used = await db('order_items').where({ product_id: product.id }).count({ c: '*' }).first();

@@ -74,9 +74,6 @@ async function updateCategory(req, res, next) {
 
 async function deleteCategory(req, res, next) {
   try {
-    if (req.admin.role !== 'super_admin') {
-      throw new AppError('Only super admins can delete categories', 403);
-    }
     const row = await db('categories').where({ id: req.params.id }).first();
     if (!row) throw new AppError('Category not found', 404);
     const used = await db('products').where({ category_id: row.id }).count({ c: '*' }).first();

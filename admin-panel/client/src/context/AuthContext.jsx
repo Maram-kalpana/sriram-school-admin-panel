@@ -41,7 +41,6 @@ export function AuthProvider({ children }) {
       admin,
       loading,
       isAuthenticated: Boolean(admin),
-      isSuperAdmin: admin?.role === 'super_admin',
       login,
       logout,
       refresh,

@@ -11,11 +11,6 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z.string().min(8),
-});
-
 function setAuthCookie(res, token) {
   res.cookie(auth.COOKIE_NAME, token, {
     httpOnly: true,
@@ -99,45 +94,9 @@ async function me(req, res) {
   });
 }
 
-async function changePassword(req, res, next) {
-  try {
-    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
-    const user = await db('admin_users').where({ id: req.admin.id }).first();
-    if (!user) {
-      throw new AppError('Admin not found', 404);
-    }
-
-    const ok = await bcrypt.compare(currentPassword, user.password_hash);
-    if (!ok) {
-      throw new AppError('Current password is incorrect', 400);
-    }
-
-    const passwordHash = await bcrypt.hash(newPassword, 12);
-    await db('admin_users').where({ id: user.id }).update({
-      password_hash: passwordHash,
-      updated_at: db.fn.now(),
-    });
-
-    res.json({ success: true, message: 'Password updated' });
-  } catch (err) {
-    if (err.name === 'ZodError') {
-      return next(
-        new AppError(
-          'Validation failed',
-          400,
-          err.issues.map((e) => ({ path: e.path.join('.'), message: e.message }))
-        )
-      );
-    }
-    return next(err);
-  }
-}
-
 module.exports = {
   login,
   logout,
   me,
-  changePassword,
   loginSchema,
-  changePasswordSchema,
 };

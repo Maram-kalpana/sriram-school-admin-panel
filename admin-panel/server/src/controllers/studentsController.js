@@ -191,9 +191,6 @@ async function updateStudent(req, res, next) {
 
 async function deleteStudent(req, res, next) {
   try {
-    if (req.admin.role !== 'super_admin') {
-      throw new AppError('Only super admins can delete students', 403);
-    }
     const student = await db('students').where({ id: req.params.id }).first();
     if (!student) throw new AppError('Student not found', 404);
 

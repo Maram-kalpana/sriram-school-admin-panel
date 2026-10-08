@@ -83,18 +83,3 @@ export async function saveSettings(payload) {
   const { data } = await api.put('/admin/settings', payload)
   return data
 }
-
-export async function listAdmins() {
-  const { data } = await api.get('/admin/settings/admins')
-  return data
-}
-
-export async function createAdmin(payload) {
-  const { data } = await api.post('/admin/settings/admins', payload)
-  return data
-}
-
-export async function updateAdmin(id, payload) {
-  const { data } = await api.patch(`/admin/settings/admins/${id}`, payload)
-  return data
-}

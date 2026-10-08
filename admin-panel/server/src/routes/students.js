@@ -1,8 +1,6 @@
 const express = require('express');
 const studentsController = require('../controllers/studentsController');
 const { memoryUpload } = require('../middleware/upload');
-const role = require('../middleware/role');
-
 const router = express.Router();
 
 router.get('/', studentsController.listStudents);
@@ -23,6 +21,6 @@ router.get('/:id', studentsController.getStudent);
 router.post('/', studentsController.createStudent);
 router.patch('/:id', studentsController.updateStudent);
 router.patch('/:id/controls', studentsController.updateControls);
-router.delete('/:id', role('super_admin'), studentsController.deleteStudent);
+router.delete('/:id', studentsController.deleteStudent);
 
 module.exports = router;
