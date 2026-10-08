@@ -86,10 +86,28 @@ curl -i -X POST http://localhost:4000/api/auth/login -H "Content-Type: applicati
 curl -i http://localhost:4000/api/auth/me -b cookies.txt
 ```
 
+## Step 3 — Students + Excel import
+
+With API + client running and DB seeded:
+
+1. Open **Students** in the sidebar.
+2. Download the sample template, optionally edit, then **Import Excel**.
+3. Confirm the preview counts (new / update / invalid), then **Confirm import**.
+4. Re-import the same file — `kit_status` / `catalog_override` must not reset.
+5. Open a student drawer: reset kit status, change catalog override, toggle active.
+6. Inline-edit phone; bulk activate/deactivate; export CSV.
+
+API:
+
+```bash
+curl -b cookies.txt -F file=@students.xlsx http://localhost:4000/api/admin/students/import/preview
+curl -b cookies.txt -F file=@students.xlsx http://localhost:4000/api/admin/students/import/commit
+```
+
 ## Next steps
 
-- **Step 3:** Students + Excel import  
-- …through dashboard, storefront API, tests (see project brief)
+- **Step 4:** Categories, Products, Variants, Images  
+- …through dashboard, storefront API, tests
 
 ## Deploy notes (later)
 

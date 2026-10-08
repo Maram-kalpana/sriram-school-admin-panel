@@ -7,6 +7,7 @@ import AdminLayout from './components/AdminLayout'
 import Login from './pages/Login'
 import ChangePassword from './pages/ChangePassword'
 import Placeholder from './pages/Placeholder'
+import Students from './pages/Students'
 
 export default function App() {
   return (
@@ -25,7 +26,7 @@ export default function App() {
                 />
               }
             />
-            <Route path="students" element={<Placeholder title="Students" />} />
+            <Route path="students" element={<Students />} />
             <Route path="products" element={<Placeholder title="Products" />} />
             <Route path="categories" element={<Placeholder title="Categories" />} />
             <Route path="inventory" element={<Placeholder title="Inventory" />} />

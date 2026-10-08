@@ -8,6 +8,7 @@ const env = require('./config/env');
 const auth = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
 const authRoutes = require('./routes/auth');
+const studentsRoutes = require('./routes/students');
 
 const app = express();
 
@@ -34,8 +35,10 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 
-// All admin APIs require auth (routes mounted in later steps)
-app.use('/api/admin', auth, (req, res) => {
+app.use('/api/admin', auth);
+app.use('/api/admin/students', studentsRoutes);
+
+app.use('/api/admin', (req, res) => {
   res.status(404).json({ success: false, message: 'Admin route not found' });
 });
 
