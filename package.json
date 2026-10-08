@@ -1,11 +1,12 @@
 {
-  "name": "school-admin",
+  "name": "scholar-store-admin",
   "private": true,
+  "description": "Scholar Store standalone admin panel (Express + React monorepo)",
   "scripts": {
-    "migrate": "npm run migrate --prefix server",
-    "seed": "npm run seed --prefix server",
-    "test": "npm test --prefix server",
-    "dev:server": "npm run dev --prefix server",
-    "dev:client": "npm run dev --prefix client"
+    "dev:server": "npm run dev --prefix admin-panel/server",
+    "dev:client": "npm run dev --prefix admin-panel/client",
+    "migrate": "npm run migrate --prefix admin-panel/server",
+    "seed": "npm run seed --prefix admin-panel/server",
+    "test": "npm test --prefix admin-panel/server"
   }
 }

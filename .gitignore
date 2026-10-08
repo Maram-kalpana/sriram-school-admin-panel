@@ -1,9 +1,12 @@
 node_modules/
 dist/
 .env
-uploads/
+.env.local
 *.log
 .DS_Store
 coverage/
-client/dist/
-server/uploads/
+uploads/
+admin-panel/server/uploads/
+admin-panel/client/dist/
+.vercel
+*.pem
