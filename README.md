@@ -4,34 +4,36 @@ Standalone admin app for **Scholar Store** (school uniforms / kits).
 Separate from the student storefront ([school-store-ouwm.vercel.app](https://school-store-ouwm.vercel.app/)).  
 This backend **owns the MySQL schema and Knex migrations**.
 
+See [docs/STOREFRONT_CONTRACT.md](docs/STOREFRONT_CONTRACT.md) for how the storefront shares the DB / API.
+
 ## Stack
 
 | Layer | Choice |
 | --- | --- |
-| Frontend | React (JSX) + Vite + React Router + Tailwind + TanStack Table |
+| Frontend | React (JSX) + Vite + React Router + Tailwind + TanStack Table + Recharts |
 | Backend | Node.js + Express (**CommonJS only**) |
 | DB | MySQL 8 + Knex (migrations, seeds, queries) |
 
 ```
 admin-panel/
   server/   Express API, Knex migrations & seeds
-  client/   Vite React admin UI (from Step 2)
-docs/       Storefront contract (Step 9)
+  client/   Vite React admin UI
+docs/       Storefront contract
 ```
 
-## Step 1 — Setup database
+## Local setup
 
-### 1. Start MySQL
+### 1. MySQL
 
-**Option A — Docker:**
+**Docker:**
 
 ```bash
 docker compose up -d
 ```
 
-**Option B — Local MySQL / XAMPP:** create database `scholar_store` and a user matching `.env`.
+**Or local/XAMPP:** create DB `scholar_store` and user matching `.env`.
 
-### 2. Install & migrate
+### 2. Server
 
 ```bash
 cd admin-panel/server
@@ -42,75 +44,60 @@ npm run seed
 npm run dev
 ```
 
-Health check: [http://localhost:4000/api/health](http://localhost:4000/api/health)
+API: http://localhost:4000/api/health
 
-### Seed data
-
-| What | Value |
-| --- | --- |
-| Super admin | `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` (default `admin@scholarstore.local` / `Admin@12345`) |
-| Students | `10101`–`10105` (P Sandeep/Red, Kalpana/Red, Ismail/Yellow, Mahalaxmi/Green, Ashok/Blue) — Hyderabad, TS |
-| Catalog | ~10 products with size/color variants + stock |
-| Kit | School Kit with kit items |
-
-### Verify schema
+### 3. Client
 
 ```bash
-mysql -u scholar -pscholar scholar_store -e "SHOW TABLES;"
-mysql -u scholar -pscholar scholar_store -e "SELECT admission_number, student_name, house_color FROM students;"
-```
-
-## Step 2 — Auth + admin UI shell
-
-```bash
-# Terminal 1 (API) — after migrate/seed from Step 1
-cd admin-panel/server
-npm run dev
-
-# Terminal 2 (UI)
 cd admin-panel/client
 npm install
 npm run dev
 ```
 
-Open [http://localhost:5173/login](http://localhost:5173/login)  
-Login with seeded admin (`admin@scholarstore.local` / `Admin@12345`).
+UI: http://localhost:5173/login  
 
-You should see the sidebar layout. Unauthenticated visits to `/admin` redirect to `/login`.  
-Change password: `/admin/change-password`.
+**Seed admin:** `admin@scholarstore.local` / `Admin@12345` (from env)  
+**Seed students:** `10101`–`10105` (Hyderabad, TS)
 
-API checks:
-
-```bash
-curl -i -X POST http://localhost:4000/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"admin@scholarstore.local\",\"password\":\"Admin@12345\"}" -c cookies.txt
-curl -i http://localhost:4000/api/auth/me -b cookies.txt
-```
-
-## Step 3 — Students + Excel import
-
-With API + client running and DB seeded:
-
-1. Open **Students** in the sidebar.
-2. Download the sample template, optionally edit, then **Import Excel**.
-3. Confirm the preview counts (new / update / invalid), then **Confirm import**.
-4. Re-import the same file — `kit_status` / `catalog_override` must not reset.
-5. Open a student drawer: reset kit status, change catalog override, toggle active.
-6. Inline-edit phone; bulk activate/deactivate; export CSV.
-
-API:
+### 4. Tests
 
 ```bash
-curl -b cookies.txt -F file=@students.xlsx http://localhost:4000/api/admin/students/import/preview
-curl -b cookies.txt -F file=@students.xlsx http://localhost:4000/api/admin/students/import/commit
+cd admin-panel/server
+npm test
 ```
 
-## Next steps
+## How to test modules
 
-- **Step 4:** Categories, Products, Variants, Images  
-- …through dashboard, storefront API, tests
+| Step | What to try |
+| --- | --- |
+| 1 Schema/seed | `npm run migrate && npm run seed` — 5 students, kit, ~10 products |
+| 2 Auth | Login at `/login`; hit `/api/auth/me` with cookie; change password |
+| 3 Students | Import Excel (preview → commit); re-import does not reset kit status |
+| 4 Products | Categories CRUD; add product with variant matrix + images |
+| 5 Inventory | Restock/adjust with note; bulk SKU/Qty Excel |
+| 6 Kit | Edit School Kit items; see stock warnings |
+| 7 Orders | Status changes; cancel restocks; packing slip + pick list |
+| 8 Dashboard/Settings | Cards + chart; settings (super_admin); admin users |
+| 9 Storefront API | `x-api-key` on `/api/storefront/login` and `/catalog` |
 
-## Deploy notes (later)
+Storefront API example:
 
-- API needs a Node host (Railway, Render, VPS) with MySQL (PlanetScale, RDS, managed MySQL).
-- Run `npm run migrate` then `npm run seed` once against production.
-- Admin client (Vite) deploys to Vercel/Netlify; set `CLIENT_ORIGIN` and proxy `/api` to the API host.
+```bash
+curl -H "x-api-key: dev-storefront-api-key" -H "Content-Type: application/json" ^
+  -d "{\"admissionNumber\":\"10101\"}" http://localhost:4000/api/storefront/login
+```
+
+## Deploy
+
+1. Provision **MySQL 8**; set `DB_*` env vars.  
+2. Deploy **admin-panel/server** on a Node host (Railway, Render, VPS).  
+   - Build/start: `npm install && npm run migrate && npm start`  
+   - Seed once: `npm run seed`  
+3. Deploy **admin-panel/client** to Vercel/Netlify.  
+   - Proxy `/api` and `/uploads` to the API origin (or set Axios `baseURL`).  
+4. Set production secrets: `JWT_SECRET`, `COOKIE_SECURE=true`, `CLIENT_ORIGIN`, `STOREFRONT_API_KEY`.
+
+## Roles
+
+- **super_admin** — everything (settings, admin users, deletes)  
+- **staff** — no settings/admin-user management; cannot delete students/products  
