@@ -60,9 +60,34 @@ mysql -u scholar -pscholar scholar_store -e "SHOW TABLES;"
 mysql -u scholar -pscholar scholar_store -e "SELECT admission_number, student_name, house_color FROM students;"
 ```
 
+## Step 2 — Auth + admin UI shell
+
+```bash
+# Terminal 1 (API) — after migrate/seed from Step 1
+cd admin-panel/server
+npm run dev
+
+# Terminal 2 (UI)
+cd admin-panel/client
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173/login](http://localhost:5173/login)  
+Login with seeded admin (`admin@scholarstore.local` / `Admin@12345`).
+
+You should see the sidebar layout. Unauthenticated visits to `/admin` redirect to `/login`.  
+Change password: `/admin/change-password`.
+
+API checks:
+
+```bash
+curl -i -X POST http://localhost:4000/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"admin@scholarstore.local\",\"password\":\"Admin@12345\"}" -c cookies.txt
+curl -i http://localhost:4000/api/auth/me -b cookies.txt
+```
+
 ## Next steps
 
-- **Step 2:** Auth, roles, React app shell / login / layout  
 - **Step 3:** Students + Excel import  
 - …through dashboard, storefront API, tests (see project brief)
 

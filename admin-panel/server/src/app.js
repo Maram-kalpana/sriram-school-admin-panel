@@ -5,11 +5,13 @@ const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const env = require('./config/env');
+const auth = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(
   cors({
     origin: env.clientOrigin,
@@ -28,6 +30,13 @@ app.get('/api/health', (req, res) => {
     message: 'Scholar Store admin API is running',
     data: { env: env.nodeEnv },
   });
+});
+
+app.use('/api/auth', authRoutes);
+
+// All admin APIs require auth (routes mounted in later steps)
+app.use('/api/admin', auth, (req, res) => {
+  res.status(404).json({ success: false, message: 'Admin route not found' });
 });
 
 app.use(errorHandler);
