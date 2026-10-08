@@ -1,0 +1,188 @@
+import { useMemo, useState } from 'react'
+import { Link as RouterLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import {
+  AppBar,
+  Badge,
+  Box,
+  Divider,
+  Drawer,
+  IconButton,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Toolbar,
+  Typography,
+  useMediaQuery,
+} from '@mui/material'
+import { useTheme } from '@mui/material/styles'
+import MenuOutlinedIcon from '@mui/icons-material/MenuOutlined'
+import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined'
+import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
+import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
+import CheckroomOutlinedIcon from '@mui/icons-material/CheckroomOutlined'
+import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
+import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined'
+import BackpackOutlinedIcon from '@mui/icons-material/BackpackOutlined'
+import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined'
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
+import { useAuth } from '../context/AuthContext'
+import { useSnackbar } from '../context/SnackbarContext'
+
+const DRAWER_WIDTH = 260
+
+const navItems = [
+  { to: '/admin/dashboard', label: 'Dashboard', icon: DashboardOutlinedIcon, end: true },
+  { to: '/admin/students', label: 'Students', icon: SchoolOutlinedIcon },
+  { to: '/admin/products', label: 'Products', icon: CheckroomOutlinedIcon },
+  { to: '/admin/categories', label: 'Categories', icon: CategoryOutlinedIcon },
+  { to: '/admin/inventory', label: 'Inventory', icon: WarehouseOutlinedIcon },
+  { to: '/admin/kit', label: 'Kit', icon: BackpackOutlinedIcon },
+  { to: '/admin/orders', label: 'Orders', icon: ShoppingCartOutlinedIcon, badgeKey: 'newOrders' },
+  { to: '/admin/gst', label: 'GST', icon: ReceiptLongOutlinedIcon },
+  { to: '/admin/settings', label: 'Settings', icon: SettingsOutlinedIcon },
+]
+
+function pathTitle(pathname) {
+  const item = navItems.find((n) =>
+    n.end ? pathname === n.to || pathname === '/admin' : pathname.startsWith(n.to)
+  )
+  return item?.label || 'Admin'
+}
+
+export default function AdminLayout({ badges = {} }) {
+  const theme = useTheme()
+  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'))
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const { admin, logout } = useAuth()
+  const { showToast } = useSnackbar()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const title = useMemo(() => pathTitle(location.pathname), [location.pathname])
+
+  async function handleLogout() {
+    await logout()
+    showToast('Logged out', 'success')
+    navigate('/login')
+  }
+
+  function isActive(item) {
+    if (item.to === '/admin/dashboard') {
+      return location.pathname === '/admin' || location.pathname === '/admin/dashboard'
+    }
+    return location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
+  }
+
+  const drawer = (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Box sx={{ px: 2.5, py: 2.5 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'primary.main',
+          }}
+        >
+          Scholar Store
+        </Typography>
+        <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+          Admin Panel
+        </Typography>
+      </Box>
+      <Divider />
+      <List sx={{ px: 1.5, py: 1.5, flex: 1 }}>
+        {navItems.map((item) => {
+          const Icon = item.icon
+          const selected = isActive(item)
+          const badge = item.badgeKey ? badges[item.badgeKey] : 0
+          return (
+            <ListItemButton
+              key={item.to}
+              component={RouterLink}
+              to={item.to}
+              selected={selected}
+              onClick={() => setMobileOpen(false)}
+            >
+              <ListItemIcon sx={{ minWidth: 40, color: selected ? 'inherit' : 'text.secondary' }}>
+                {badge ? (
+                  <Badge badgeContent={badge} color="error" max={99}>
+                    <Icon fontSize="small" />
+                  </Badge>
+                ) : (
+                  <Icon fontSize="small" />
+                )}
+              </ListItemIcon>
+              <ListItemText
+                primary={item.label}
+                primaryTypographyProps={{ fontSize: 14, fontWeight: selected ? 600 : 500 }}
+              />
+            </ListItemButton>
+          )
+        })}
+      </List>
+    </Box>
+  )
+
+  return (
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+      <Box component="nav" sx={{ width: { lg: DRAWER_WIDTH }, flexShrink: { lg: 0 } }}>
+        {isDesktop ? (
+          <Drawer
+            variant="permanent"
+            open
+            sx={{
+              '& .MuiDrawer-paper': { width: DRAWER_WIDTH, boxSizing: 'border-box' },
+            }}
+          >
+            {drawer}
+          </Drawer>
+        ) : (
+          <Drawer
+            variant="temporary"
+            open={mobileOpen}
+            onClose={() => setMobileOpen(false)}
+            ModalProps={{ keepMounted: true }}
+            sx={{
+              '& .MuiDrawer-paper': { width: DRAWER_WIDTH, boxSizing: 'border-box' },
+            }}
+          >
+            {drawer}
+          </Drawer>
+        )}
+      </Box>
+
+      <Box sx={{ flexGrow: 1, width: { lg: `calc(100% - ${DRAWER_WIDTH}px)` }, minWidth: 0 }}>
+        <AppBar position="sticky" color="inherit" elevation={0}>
+          <Toolbar sx={{ gap: 1 }}>
+            {!isDesktop && (
+              <IconButton edge="start" onClick={() => setMobileOpen(true)} aria-label="Open menu">
+                <MenuOutlinedIcon />
+              </IconButton>
+            )}
+            <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
+              {title}
+            </Typography>
+            <Box sx={{ textAlign: 'right', mr: 0.5 }}>
+              <Typography variant="body2" fontWeight={600} lineHeight={1.2}>
+                {admin?.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
+                {(admin?.role || '').replace(/_/g, ' ')}
+              </Typography>
+            </Box>
+            <IconButton onClick={handleLogout} aria-label="Logout" color="inherit">
+              <LogoutOutlinedIcon />
+            </IconButton>
+          </Toolbar>
+        </AppBar>
+
+        <Box component="main" sx={{ p: { xs: 2, md: 3 } }}>
+          <Outlet />
+        </Box>
+      </Box>
+    </Box>
+  )
+}

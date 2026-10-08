@@ -1,11 +1,21 @@
 import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import toast from 'react-hot-toast'
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material'
 import { useAuth } from '../context/AuthContext'
+import { useSnackbar } from '../context/SnackbarContext'
 
 export default function Login() {
   const { login, isAuthenticated, loading } = useAuth()
+  const { showToast } = useSnackbar()
   const navigate = useNavigate()
   const location = useLocation()
   const [submitting, setSubmitting] = useState(false)
@@ -21,73 +31,75 @@ export default function Login() {
   })
 
   if (!loading && isAuthenticated) {
-    return <Navigate to="/admin" replace />
+    return <Navigate to="/admin/dashboard" replace />
   }
 
   async function onSubmit(values) {
     setSubmitting(true)
     try {
       await login(values.email, values.password)
-      toast.success('Welcome back')
-      const redirectTo = location.state?.from?.pathname || '/admin'
-      navigate(redirectTo, { replace: true })
+      showToast('Welcome back', 'success')
+      navigate(location.state?.from?.pathname || '/admin/dashboard', { replace: true })
     } catch (err) {
-      const message = err.response?.data?.message || 'Login failed'
-      toast.error(message)
+      showToast(err.response?.data?.message || 'Login failed', 'error')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-slate-100 px-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-wider text-indigo-600">
-          Scholar Store
-        </p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">Admin login</h1>
-        <p className="mt-1 text-sm text-slate-500">Sign in to manage kits, inventory, and orders.</p>
-
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit(onSubmit)}>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="username"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
-              {...register('email', { required: 'Email is required' })}
-            />
-            {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>}
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
-              {...register('password', { required: 'Password is required' })}
-            />
-            {errors.password && (
-              <p className="mt-1 text-xs text-red-600">{errors.password.message}</p>
-            )}
-          </div>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        px: 2,
+        background: 'linear-gradient(135deg, #eef2ff 0%, #ffffff 45%, #f8fafc 100%)',
+      }}
+    >
+      <Card sx={{ width: '100%', maxWidth: 420 }}>
+        <CardContent sx={{ p: 4 }}>
+          <Typography
+            variant="caption"
+            sx={{ fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'primary.main' }}
           >
-            {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-      </div>
-    </div>
+            Scholar Store
+          </Typography>
+          <Typography variant="h5" sx={{ mt: 1, fontWeight: 700 }}>
+            Admin login
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            Sign in to manage kits, inventory, and orders.
+          </Typography>
+
+          <Box component="form" onSubmit={handleSubmit(onSubmit)} sx={{ mt: 3 }}>
+            <Stack spacing={2}>
+              <TextField
+                label="Email"
+                type="email"
+                fullWidth
+                autoComplete="username"
+                error={Boolean(errors.email)}
+                helperText={errors.email?.message}
+                {...register('email', { required: 'Email is required' })}
+              />
+              <TextField
+                label="Password"
+                type="password"
+                fullWidth
+                autoComplete="current-password"
+                error={Boolean(errors.password)}
+                helperText={errors.password?.message}
+                {...register('password', { required: 'Password is required' })}
+              />
+              <Button type="submit" variant="contained" size="large" disabled={submitting} fullWidth>
+                {submitting ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </Stack>
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
   )
 }
