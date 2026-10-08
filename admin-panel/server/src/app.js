@@ -11,6 +11,12 @@ const authRoutes = require('./routes/auth');
 const studentsRoutes = require('./routes/students');
 const categoriesRoutes = require('./routes/categories');
 const productsRoutes = require('./routes/products');
+const inventoryRoutes = require('./routes/inventory');
+const kitRoutes = require('./routes/kit');
+const ordersRoutes = require('./routes/orders');
+const dashboardRoutes = require('./routes/dashboard');
+const settingsRoutes = require('./routes/settings');
+const storefrontRoutes = require('./routes/storefront');
 
 const app = express();
 
@@ -36,11 +42,17 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/storefront', storefrontRoutes);
 
 app.use('/api/admin', auth);
 app.use('/api/admin/students', studentsRoutes);
 app.use('/api/admin/categories', categoriesRoutes);
 app.use('/api/admin/products', productsRoutes);
+app.use('/api/admin/inventory', inventoryRoutes);
+app.use('/api/admin/kit', kitRoutes);
+app.use('/api/admin/orders', ordersRoutes);
+app.use('/api/admin/dashboard', dashboardRoutes);
+app.use('/api/admin/settings', settingsRoutes);
 
 app.use('/api/admin', (req, res) => {
   res.status(404).json({ success: false, message: 'Admin route not found' });
