@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import AdminLayout from './layouts/AdminLayout'
 import Login from './pages/Login'
 import PlaceholderPage from './pages/PlaceholderPage'
+import Settings from './pages/Settings'
 
 export default function App() {
   return (
@@ -32,7 +33,7 @@ export default function App() {
             <Route path="orders" element={<PlaceholderPage title="Orders" />} />
             <Route path="orders/:id" element={<PlaceholderPage title="Order detail" />} />
             <Route path="gst" element={<PlaceholderPage title="GST" description="Invoices, summaries, and tax mapping." />} />
-            <Route path="settings" element={<PlaceholderPage title="Settings" description="General, store rules, Paytm, SMTP." />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
         </Route>
         <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />

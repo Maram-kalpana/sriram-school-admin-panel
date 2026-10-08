@@ -6,8 +6,8 @@ const env = {
   db: {
     host: process.env.DB_HOST || '127.0.0.1',
     port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER || 'scholar',
-    password: process.env.DB_PASSWORD || 'scholar',
+    user: process.env.DB_USER ?? 'scholar',
+    password: process.env.DB_PASSWORD ?? 'scholar',
     database: process.env.DB_NAME || 'scholar_store',
   },
   jwtSecret: process.env.JWT_SECRET || 'dev-jwt-secret-change-me',
@@ -19,6 +19,10 @@ const env = {
   adminSeedName: process.env.ADMIN_SEED_NAME || 'Super Admin',
   storefrontApiKey: process.env.STOREFRONT_API_KEY || 'dev-storefront-api-key',
   uploadDir: process.env.UPLOAD_DIR || 'uploads',
+  settingsEncryptionKey:
+    process.env.SETTINGS_ENCRYPTION_KEY ||
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  apiBaseUrl: process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 4000}`,
 };
 
 module.exports = env;
