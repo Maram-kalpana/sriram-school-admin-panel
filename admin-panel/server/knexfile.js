@@ -5,8 +5,10 @@ const shared = {
   connection: {
     host: process.env.DB_HOST || '127.0.0.1',
     port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER || 'scholar',
-    password: process.env.DB_PASSWORD || 'scholar',
+    // Use ?? so an empty DB_PASSWORD= in .env stays empty (XAMPP root default).
+    // || would wrongly fall back to 'scholar' when password is "".
+    user: process.env.DB_USER ?? 'scholar',
+    password: process.env.DB_PASSWORD ?? 'scholar',
     database: process.env.DB_NAME || 'scholar_store',
     charset: 'utf8mb4',
     timezone: 'Z',
