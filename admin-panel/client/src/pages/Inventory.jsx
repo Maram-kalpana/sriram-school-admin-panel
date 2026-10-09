@@ -1,5 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
-import toast from 'react-hot-toast'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Drawer,
+  Grid,
+  MenuItem,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material'
+import PageHeader from '../components/PageHeader'
+import DataTable from '../components/DataTable'
+import StatCard from '../components/StatCard'
+import StatusBadge from '../components/StatusBadge'
+import { CardGridSkeleton } from '../components/LoadingSkeleton'
+import usePaginatedList from '../hooks/usePaginatedList'
+import { useSnackbar } from '../context/SnackbarContext'
+import { formatINR, formatNumber, formatDateTime } from '../utils/format'
 import {
   adjustStock,
   bulkStockCommit,
@@ -7,28 +27,28 @@ import {
   listInventory,
   listMovements,
 } from '../api/admin'
+import api from '../api/client'
 
 export default function Inventory() {
-  const [items, setItems] = useState([])
-  const [pagination, setPagination] = useState({ page: 1, totalPages: 1 })
-  const [search, setSearch] = useState('')
-  const [stockFilter, setStockFilter] = useState('')
+  const { showToast } = useSnackbar()
+  const [filters, setFilters] = useState({ search: '', stockFilter: '' })
+  const [kpis, setKpis] = useState(null)
   const [dialog, setDialog] = useState(null)
   const [history, setHistory] = useState(null)
   const [bulkPreview, setBulkPreview] = useState(null)
   const [bulkFile, setBulkFile] = useState(null)
+  const [inline, setInline] = useState({})
 
-  const load = useCallback(async (page = 1) => {
-    try {
-      const res = await listInventory({ page, pageSize: 50, search, stockFilter })
-      setItems(res.data.items)
-      setPagination(res.data.pagination)
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to load')
-    }
-  }, [search, stockFilter])
+  const fetcher = useMemo(() => (params) => listInventory(params), [])
+  const { items, pagination, loading, error, page, pageSize, setPage, setPageSize, reload } =
+    usePaginatedList(fetcher, filters)
 
-  useEffect(() => { load(1) }, [load])
+  useEffect(() => {
+    api
+      .get('/admin/inventory/summary')
+      .then((r) => setKpis(r.data.data))
+      .catch(() => {})
+  }, [items])
 
   async function submitAdjust(e) {
     e.preventDefault()
@@ -38,153 +58,213 @@ export default function Inventory() {
         quantity: Number(dialog.quantity),
         note: dialog.note,
       })
-      toast.success('Stock updated')
+      showToast('Stock updated', 'success')
       setDialog(null)
-      load(pagination.page)
+      reload()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Update failed')
+      showToast(err.response?.data?.message || 'Update failed', 'error')
     }
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Inventory</h1>
-        <div className="flex gap-2">
-          <a href="/api/admin/inventory/export" className="rounded-lg border px-3 py-2 text-sm">Export CSV</a>
-          <label className="cursor-pointer rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white">
-            Bulk Excel
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (!file) return
-                setBulkFile(file)
-                try {
-                  const res = await bulkStockPreview(file)
-                  setBulkPreview(res.data)
-                } catch (err) {
-                  toast.error(err.response?.data?.message || 'Preview failed')
-                }
-              }}
-            />
-          </label>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2 rounded-xl border bg-white p-3">
-        <input className="flex-1 rounded-lg border px-3 py-2 text-sm" placeholder="Search SKU / product" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <select className="rounded-lg border px-3 py-2 text-sm" value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}>
-          <option value="">All</option>
-          <option value="low">Low stock</option>
-          <option value="out">Out of stock</option>
-        </select>
-        <button type="button" onClick={() => load(1)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">Apply</button>
-      </div>
-
-      <div className="overflow-x-auto rounded-xl border bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Product</th>
-              <th className="px-3 py-3">SKU</th>
-              <th className="px-3 py-3">Options</th>
-              <th className="px-3 py-3">Stock</th>
-              <th className="px-3 py-3">Threshold</th>
-              <th className="px-3 py-3">Status</th>
-              <th className="px-3 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((v) => (
-              <tr key={v.id} className="border-t">
-                <td className="px-3 py-2">{v.productName}</td>
-                <td className="px-3 py-2 font-mono text-xs">{v.sku}</td>
-                <td className="px-3 py-2 text-xs">
-                  {[v.option1Value, v.option2Value].filter(Boolean).join(' / ')}
-                </td>
-                <td className="px-3 py-2">{v.stockQty}</td>
-                <td className="px-3 py-2">{v.lowStockThreshold}</td>
-                <td className="px-3 py-2">
-                  <span className={`rounded px-2 py-0.5 text-xs ${
-                    v.statusBadge === 'out' ? 'bg-red-100 text-red-700' :
-                    v.statusBadge === 'low' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                  }`}>{v.statusBadge}</span>
-                </td>
-                <td className="px-3 py-2 space-x-2">
-                  <button type="button" className="text-indigo-600" onClick={() => setDialog({ id: v.id, mode: 'set', quantity: v.stockQty, note: '', sku: v.sku })}>Set</button>
-                  <button type="button" className="text-emerald-600" onClick={() => setDialog({ id: v.id, mode: 'restock', quantity: 10, note: '', sku: v.sku })}>Restock</button>
-                  <button type="button" className="text-amber-600" onClick={() => setDialog({ id: v.id, mode: 'adjust', quantity: -1, note: '', sku: v.sku })}>Adjust</button>
-                  <button type="button" className="text-slate-600" onClick={async () => {
-                    const res = await listMovements(v.id)
-                    setHistory({ sku: v.sku, items: res.data.items })
-                  }}>History</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {dialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <form onSubmit={submitAdjust} className="w-full max-w-md rounded-xl bg-white p-5">
-            <h2 className="mb-3 text-lg font-bold capitalize">{dialog.mode} · {dialog.sku}</h2>
-            <label className="block text-sm">Quantity
-              <input type="number" className="mt-1 w-full rounded-lg border px-3 py-2" value={dialog.quantity} onChange={(e) => setDialog((d) => ({ ...d, quantity: e.target.value }))} required />
-            </label>
-            <label className="mt-3 block text-sm">Reason / note
-              <input className="mt-1 w-full rounded-lg border px-3 py-2" value={dialog.note} onChange={(e) => setDialog((d) => ({ ...d, note: e.target.value }))} required />
-            </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setDialog(null)}>Cancel</button>
-              <button type="submit" className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white">Save</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {history && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5">
-            <div className="mb-3 flex justify-between"><h2 className="font-bold">Movements · {history.sku}</h2><button type="button" onClick={() => setHistory(null)}>✕</button></div>
-            <ul className="space-y-2 text-sm">
-              {history.items.map((m) => (
-                <li key={m.id} className="rounded border p-2">
-                  <span className={m.changeQty >= 0 ? 'text-emerald-600' : 'text-red-600'}>{m.changeQty > 0 ? '+' : ''}{m.changeQty}</span>
-                  {' '}{m.reason} · {m.note || '—'} · {m.adminName || 'system'}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {bulkPreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5">
-            <h2 className="mb-3 font-bold">Bulk stock preview</h2>
-            <p className="text-sm text-slate-500">Valid {bulkPreview.counts.valid} / Invalid {bulkPreview.counts.invalid}</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => setBulkPreview(null)}>Close</button>
-              <button
-                type="button"
-                className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
-                onClick={async () => {
-                  const res = await bulkStockCommit(bulkFile)
-                  toast.success(`Updated ${res.data.updated}`)
-                  setBulkPreview(null)
-                  load(1)
+    <>
+      <PageHeader
+        title="Inventory"
+        subtitle="Variant stock, restock, adjustments, and bulk Excel."
+        actions={
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button variant="outlined" href="/api/admin/inventory/export?format=csv">Export CSV</Button>
+            <Button variant="outlined" href="/api/admin/inventory/export?format=xlsx">Export Excel</Button>
+            <Button variant="outlined" href="/api/admin/inventory/low-stock-report">Low-stock report</Button>
+            <Button variant="contained" component="label">
+              Bulk Excel
+              <input
+                hidden
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setBulkFile(file)
+                  try {
+                    const res = await bulkStockPreview(file)
+                    setBulkPreview(res.data)
+                  } catch (err) {
+                    showToast(err.response?.data?.message || 'Preview failed', 'error')
+                  }
                 }}
-              >
-                Commit
-              </button>
-            </div>
-          </div>
-        </div>
+              />
+            </Button>
+          </Stack>
+        }
+      />
+
+      {!kpis ? (
+        <CardGridSkeleton count={5} />
+      ) : (
+        <Grid container spacing={2} sx={{ mb: 2 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}><StatCard title="Total SKUs" value={formatNumber(kpis.totalSkus)} /></Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}><StatCard title="Units in stock" value={formatNumber(kpis.unitsInStock)} /></Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}><StatCard title="Stock value" value={formatINR(kpis.stockValue)} /></Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}><StatCard title="Low stock" value={kpis.lowStock} /></Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}><StatCard title="Out of stock" value={kpis.outOfStock} /></Grid>
+        </Grid>
       )}
-    </div>
+
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
+        <TextField
+          placeholder="Search SKU / product"
+          fullWidth
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+        />
+        <TextField
+          select
+          label="Stock"
+          value={filters.stockFilter}
+          onChange={(e) => setFilters((f) => ({ ...f, stockFilter: e.target.value }))}
+          sx={{ minWidth: 160 }}
+        >
+          <MenuItem value="">All</MenuItem>
+          <MenuItem value="low">Low</MenuItem>
+          <MenuItem value="out">Out of stock</MenuItem>
+        </TextField>
+      </Stack>
+
+      <DataTable
+        columns={[
+          { id: 'productName', label: 'Product', render: (r) => r.productName },
+          { id: 'sku', label: 'SKU', render: (r) => r.sku },
+          { id: 'opts', label: 'Options', render: (r) => [r.option1Value, r.option2Value].filter(Boolean).join(' / ') || '—' },
+          {
+            id: 'stockQty',
+            label: 'Qty',
+            width: 140,
+            render: (r) => (
+              <TextField
+                size="small"
+                type="number"
+                value={inline[r.id] ?? r.stockQty}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setInline((s) => ({ ...s, [r.id]: e.target.value }))}
+                onBlur={async (e) => {
+                  const qty = Number(e.target.value)
+                  if (qty === r.stockQty || Number.isNaN(qty)) return
+                  try {
+                    await adjustStock(r.id, { mode: 'set', quantity: qty, note: 'Inline qty edit' })
+                    showToast('Qty saved', 'success')
+                    reload()
+                  } catch (err) {
+                    showToast(err.response?.data?.message || 'Failed', 'error')
+                  }
+                }}
+                sx={{ width: 90 }}
+              />
+            ),
+          },
+          { id: 'th', label: 'Threshold', render: (r) => r.lowStockThreshold },
+          { id: 'status', label: 'Status', render: (r) => <StatusBadge status={r.statusBadge === 'ok' ? 'in stock' : r.statusBadge} /> },
+          {
+            id: 'actions',
+            label: '',
+            align: 'right',
+            render: (r) => (
+              <Stack direction="row" spacing={0.5} justifyContent="flex-end" onClick={(e) => e.stopPropagation()}>
+                <Button size="small" onClick={() => setDialog({ id: r.id, mode: 'restock', quantity: 10, note: '', sku: r.sku })}>Restock</Button>
+                <Button size="small" onClick={() => setDialog({ id: r.id, mode: 'adjust', quantity: -1, note: '', sku: r.sku })}>Adjust</Button>
+                <Button
+                  size="small"
+                  onClick={async () => {
+                    const res = await listMovements(r.id)
+                    setHistory({ sku: r.sku, items: res.data.items })
+                  }}
+                >
+                  History
+                </Button>
+              </Stack>
+            ),
+          },
+        ]}
+        rows={items}
+        loading={loading}
+        error={error}
+        page={page}
+        pageSize={pageSize}
+        total={pagination.total}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        emptyTitle="No variants"
+      />
+
+      <Dialog open={Boolean(dialog)} onClose={() => setDialog(null)} maxWidth="xs" fullWidth>
+        <form onSubmit={submitAdjust}>
+          <DialogTitle sx={{ textTransform: 'capitalize' }}>{dialog?.mode} · {dialog?.sku}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                type="number"
+                label="Quantity"
+                required
+                fullWidth
+                value={dialog?.quantity ?? ''}
+                onChange={(e) => setDialog((d) => ({ ...d, quantity: e.target.value }))}
+              />
+              <TextField
+                label="Reason"
+                required
+                fullWidth
+                value={dialog?.note ?? ''}
+                onChange={(e) => setDialog((d) => ({ ...d, note: e.target.value }))}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setDialog(null)}>Cancel</Button>
+            <Button type="submit" variant="contained">Save</Button>
+          </DialogActions>
+        </form>
+      </Dialog>
+
+      <Drawer anchor="right" open={Boolean(history)} onClose={() => setHistory(null)}>
+        <Stack sx={{ width: { xs: 320, sm: 420 }, p: 2 }} spacing={1}>
+          <Typography fontWeight={700}>Movements · {history?.sku}</Typography>
+          {(history?.items || []).map((m) => (
+            <Stack key={m.id} direction="row" justifyContent="space-between" sx={{ borderBottom: 1, borderColor: 'divider', py: 1 }}>
+              <Typography variant="body2">
+                {m.changeQty > 0 ? '+' : ''}{m.changeQty} · {m.reason}
+                <br />
+                <Typography component="span" variant="caption" color="text.secondary">
+                  {m.note || '—'} · {m.adminName || 'system'} · {formatDateTime(m.createdAt)}
+                </Typography>
+              </Typography>
+            </Stack>
+          ))}
+          {!history?.items?.length && <Typography variant="body2" color="text.secondary">No movements</Typography>}
+        </Stack>
+      </Drawer>
+
+      <Dialog open={Boolean(bulkPreview)} onClose={() => setBulkPreview(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Bulk stock preview</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Valid {bulkPreview?.counts?.valid} / Invalid {bulkPreview?.counts?.invalid}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkPreview(null)}>Close</Button>
+          <Button
+            variant="contained"
+            onClick={async () => {
+              const res = await bulkStockCommit(bulkFile)
+              showToast(`Updated ${res.data.updated}`, 'success')
+              setBulkPreview(null)
+              reload()
+            }}
+          >
+            Commit
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   )
 }

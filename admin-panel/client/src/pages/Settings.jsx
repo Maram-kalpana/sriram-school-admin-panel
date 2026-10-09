@@ -18,6 +18,8 @@ import {
   Typography,
 } from '@mui/material'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
+import ArrowUpwardOutlinedIcon from '@mui/icons-material/ArrowUpwardOutlined'
+import ArrowDownwardOutlinedIcon from '@mui/icons-material/ArrowDownwardOutlined'
 import PageHeader from '../components/PageHeader'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import { useSnackbar } from '../context/SnackbarContext'
@@ -312,7 +314,17 @@ export default function Settings() {
                 })}>
                   Save Paytm
                 </Button>
-                <Button variant="outlined" disabled title="Wired in Paytm step">
+                <Button
+                  variant="outlined"
+                  onClick={async () => {
+                    try {
+                      const { data } = await api.post('/admin/settings/paytm/test')
+                      showToast(data.message || (data.data?.ok ? 'Paytm OK' : 'Check credentials'), data.data?.ok ? 'success' : 'warning')
+                    } catch (err) {
+                      showToast(err.response?.data?.message || 'Test failed', 'error')
+                    }
+                  }}
+                >
                   Test connection
                 </Button>
               </Stack>
@@ -362,19 +374,47 @@ export default function Settings() {
               </Typography>
               {(form.payment_methods || []).map((m, idx) => (
                 <Box key={m.id}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={Boolean(m.enabled)}
-                        onChange={(e) => {
+                  <Stack direction="row" alignItems="center" justifyContent="space-between">
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={Boolean(m.enabled)}
+                          onChange={(e) => {
+                            const next = [...(form.payment_methods || [])]
+                            next[idx] = { ...m, enabled: e.target.checked }
+                            setField('payment_methods', next)
+                          }}
+                        />
+                      }
+                      label={m.label}
+                    />
+                    <Stack direction="row">
+                      <IconButton
+                        size="small"
+                        aria-label="Move up"
+                        disabled={idx === 0}
+                        onClick={() => {
                           const next = [...(form.payment_methods || [])]
-                          next[idx] = { ...m, enabled: e.target.checked }
+                          ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
                           setField('payment_methods', next)
                         }}
-                      />
-                    }
-                    label={m.label}
-                  />
+                      >
+                        <ArrowUpwardOutlinedIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        aria-label="Move down"
+                        disabled={idx === (form.payment_methods || []).length - 1}
+                        onClick={() => {
+                          const next = [...(form.payment_methods || [])]
+                          ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
+                          setField('payment_methods', next)
+                        }}
+                      >
+                        <ArrowDownwardOutlinedIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Stack>
                   {idx < (form.payment_methods || []).length - 1 && <Divider sx={{ my: 1 }} />}
                 </Box>
               ))}

@@ -16,6 +16,8 @@ const kitRoutes = require('./routes/kit');
 const ordersRoutes = require('./routes/orders');
 const dashboardRoutes = require('./routes/dashboard');
 const settingsRoutes = require('./routes/settings');
+const gstRoutes = require('./routes/gst');
+const paymentsRoutes = require('./routes/payments');
 const storefrontRoutes = require('./routes/storefront');
 
 const app = express();
@@ -53,6 +55,8 @@ app.use('/api/admin/kit', kitRoutes);
 app.use('/api/admin/orders', ordersRoutes);
 app.use('/api/admin/dashboard', dashboardRoutes);
 app.use('/api/admin/settings', settingsRoutes);
+app.use('/api/admin/gst', gstRoutes);
+app.use('/api/admin/payments', paymentsRoutes);
 
 app.use('/api/admin', (req, res) => {
   res.status(404).json({ success: false, message: 'Admin route not found' });

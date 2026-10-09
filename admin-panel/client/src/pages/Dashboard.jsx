@@ -1,83 +1,236 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import toast from 'react-hot-toast'
-import { getDashboard } from '../api/admin'
+import { Link as RouterLink } from 'react-router-dom'
+import {
+  Box,
+  Card,
+  CardContent,
+  Grid,
+  Link,
+  List,
+  ListItem,
+  ListItemText,
+  Typography,
+} from '@mui/material'
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import PageHeader from '../components/PageHeader'
+import StatCard from '../components/StatCard'
+import EmptyState from '../components/EmptyState'
+import { CardGridSkeleton } from '../components/LoadingSkeleton'
+import StatusBadge from '../components/StatusBadge'
+import { useSnackbar } from '../context/SnackbarContext'
+import { formatDateTime, formatINR } from '../utils/format'
+import api from '../api/client'
+
+const INDIGO = '#4f46e5'
+const STATUS_COLORS = ['#4f46e5', '#4338ca', '#6366f1', '#818cf8', '#059669', '#dc2626', '#d97706']
 
 export default function Dashboard() {
+  const { showToast } = useSnackbar()
   const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
-    getDashboard()
-      .then((res) => setData(res.data))
-      .catch((err) => toast.error(err.response?.data?.message || 'Failed to load dashboard'))
+    api
+      .get('/admin/dashboard')
+      .then((res) => setData(res.data.data))
+      .catch((err) => {
+        const msg = err.response?.data?.message || 'Failed to load dashboard'
+        setError(msg)
+        showToast(msg, 'error')
+      })
+      .finally(() => setLoading(false))
   }, [])
 
-  if (!data) return <p className="text-slate-500">Loading dashboard…</p>
+  if (loading) {
+    return (
+      <>
+        <PageHeader title="Dashboard" subtitle="Overview of sales, stock, and students." />
+        <CardGridSkeleton count={8} />
+      </>
+    )
+  }
 
-  const cards = [
-    ['Students', data.cards.totalStudents],
-    ['Logged in once', data.cards.studentsLoggedIn],
-    ['Kit orders', data.cards.kitOrders],
-    ['Individual orders', data.cards.individualOrders],
-    ['Revenue (paid)', `₹${data.cards.totalRevenue}`],
-    ['Pending orders', data.cards.pendingOrders],
-    ['Low stock', data.cards.lowStockVariants],
-    ['Out of stock', data.cards.outOfStockVariants],
+  if (error || !data) {
+    return (
+      <>
+        <PageHeader title="Dashboard" subtitle="Overview of sales, stock, and students." />
+        <EmptyState title="Could not load dashboard" description={error || 'No data'} />
+      </>
+    )
+  }
+
+  const c = data.cards
+  const kpis = [
+    ['Total revenue', formatINR(c.totalRevenue)],
+    ["Today's sales", formatINR(c.todaySales)],
+    ['Total orders', c.totalOrders],
+    ['Students', c.totalStudents],
+    ['Products', c.products],
+    ['Stock alerts', c.stockAlerts],
+    ['Kit / Individual', `${c.kitOrders} / ${c.individualOrders}`],
+    ['GST this month', formatINR(c.gstThisMonth)],
+    ['Online payments', formatINR(c.onlinePayments)],
   ]
 
+  const statuses = Object.entries(data.statusCounts || {})
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value]) => (
-          <div key={label} className="rounded-xl border bg-white p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-            <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
-          </div>
+    <>
+      <PageHeader title="Dashboard" subtitle="Overview of sales, stock, and students." />
+
+      <Grid container spacing={2} sx={{ mb: 2 }}>
+        {kpis.map(([title, value]) => (
+          <Grid key={title} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+            <StatCard title={title} value={value} />
+          </Grid>
         ))}
-      </div>
+      </Grid>
 
-      <div className="rounded-xl border bg-white p-4">
-        <h2 className="mb-3 font-semibold">Orders per day (30 days)</h2>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.ordersPerDay}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="day" tick={{ fontSize: 10 }} />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, textTransform: 'uppercase' }}>
+        Order status
+      </Typography>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {statuses.map(([status, count]) => (
+          <Grid key={status} size={{ xs: 6, sm: 4, md: 3, lg: 'auto' }}>
+            <Card variant="outlined" sx={{ minWidth: 120 }}>
+              <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                <StatusBadge status={status} />
+                <Typography variant="h6" sx={{ mt: 1 }}>{count}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border bg-white p-4">
-          <h2 className="mb-3 font-semibold">Recent orders</h2>
-          <ul className="space-y-2 text-sm">
-            {data.recentOrders.map((o) => (
-              <li key={o.id} className="flex justify-between border-b py-2">
-                <Link className="text-indigo-600" to={`/admin/orders/${o.id}`}>{o.order_number}</Link>
-                <span className="text-slate-500">{o.student_name} · ₹{o.total}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section className="rounded-xl border bg-white p-4">
-          <h2 className="mb-3 font-semibold">Low stock alerts</h2>
-          <ul className="space-y-2 text-sm">
-            {data.lowStockList.map((v) => (
-              <li key={v.sku} className="flex justify-between border-b py-2">
-                <span>{v.product_name} · {v.sku}</span>
-                <span className="font-medium text-amber-700">{v.stock_qty}</span>
-              </li>
-            ))}
-            {!data.lowStockList.length && <li className="text-slate-400">All good</li>}
-          </ul>
-        </section>
-      </div>
-    </div>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid size={{ xs: 12, lg: 8 }}>
+          <Card variant="outlined" sx={{ p: 2, height: 320 }}>
+            <Typography fontWeight={600} sx={{ mb: 1 }}>Revenue (12 months)</Typography>
+            <ResponsiveContainer width="100%" height="90%">
+              <AreaChart data={data.revenueByMonth}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Area type="monotone" dataKey="revenue" stroke={INDIGO} fill="#eef2ff" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <Card variant="outlined" sx={{ p: 2, height: 320 }}>
+            <Typography fontWeight={600} sx={{ mb: 1 }}>Orders by status</Typography>
+            <ResponsiveContainer width="100%" height="90%">
+              <PieChart>
+                <Pie data={data.ordersByStatus.filter((d) => d.value > 0)} dataKey="value" nameKey="name" outerRadius={90} label>
+                  {data.ordersByStatus.map((_, i) => (
+                    <Cell key={i} fill={STATUS_COLORS[i % STATUS_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 7 }}>
+          <Card variant="outlined" sx={{ p: 2, height: 300 }}>
+            <Typography fontWeight={600} sx={{ mb: 1 }}>Daily sales (30 days)</Typography>
+            <ResponsiveContainer width="100%" height="90%">
+              <AreaChart data={data.ordersPerDay}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Area type="monotone" dataKey="sales" stroke={INDIGO} fill="#eef2ff" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 5 }}>
+          <Card variant="outlined" sx={{ p: 2, height: 300 }}>
+            <Typography fontWeight={600} sx={{ mb: 1 }}>Top-selling products</Typography>
+            <ResponsiveContainer width="100%" height="90%">
+              <BarChart data={data.topProducts} layout="vertical" margin={{ left: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Bar dataKey="qty" fill={INDIGO} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={600} sx={{ mb: 1 }}>Recent orders</Typography>
+              <List dense>
+                {data.recentOrders.map((o) => (
+                  <ListItem key={o.id} disableGutters>
+                    <ListItemText
+                      primary={<Link component={RouterLink} to={`/admin/orders/${o.id}`} underline="hover">{o.order_number}</Link>}
+                      secondary={`${o.student_name} · ${formatINR(o.total)}`}
+                    />
+                    <StatusBadge status={o.status} />
+                  </ListItem>
+                ))}
+                {!data.recentOrders.length && <Typography variant="body2" color="text.secondary">No orders yet</Typography>}
+              </List>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={600} sx={{ mb: 1 }}>Low stock</Typography>
+              <List dense>
+                {data.lowStockList.map((v) => (
+                  <ListItem key={v.sku} disableGutters>
+                    <ListItemText primary={v.product_name} secondary={v.sku} />
+                    <Typography color="warning.main" fontWeight={700}>{v.stock_qty}</Typography>
+                  </ListItem>
+                ))}
+                {!data.lowStockList.length && <Typography variant="body2" color="text.secondary">All good</Typography>}
+              </List>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={600} sx={{ mb: 1 }}>Recent logins</Typography>
+              <List dense>
+                {data.recentLogins.map((s) => (
+                  <ListItem key={s.id} disableGutters>
+                    <ListItemText
+                      primary={`${s.student_name} (${s.admission_number})`}
+                      secondary={`${s.house_color} · ${formatDateTime(s.last_login_at)}`}
+                    />
+                  </ListItem>
+                ))}
+                {!data.recentLogins.length && <Typography variant="body2" color="text.secondary">No logins yet</Typography>}
+              </List>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    </>
   )
 }

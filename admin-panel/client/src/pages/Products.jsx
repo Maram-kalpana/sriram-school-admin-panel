@@ -1,202 +1,264 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import toast from 'react-hot-toast'
-import { useAuth } from '../context/AuthContext'
+import { useEffect, useMemo, useState } from 'react'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
+import {
+  Avatar,
+  Button,
+  Checkbox,
+  MenuItem,
+  Stack,
+  Switch,
+  TextField,
+} from '@mui/material'
+import AddOutlinedIcon from '@mui/icons-material/AddOutlined'
+import PageHeader from '../components/PageHeader'
+import DataTable from '../components/DataTable'
+import StatusBadge from '../components/StatusBadge'
+import ConfirmDialog from '../components/ConfirmDialog'
+import usePaginatedList from '../hooks/usePaginatedList'
+import { useSnackbar } from '../context/SnackbarContext'
+import { formatDate, formatINR } from '../utils/format'
 import {
   bulkProductStatus,
   deleteProduct,
   duplicateProduct,
   listCategories,
   listProducts,
+  updateProduct,
 } from '../api/catalog'
 
-export default function Products() {
-  const { isSuperAdmin } = useAuth()
-  const [items, setItems] = useState([])
-  const [categories, setCategories] = useState([])
-  const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 })
-  const [search, setSearch] = useState('')
-  const [categoryId, setCategoryId] = useState('')
-  const [status, setStatus] = useState('')
-  const [stockFilter, setStockFilter] = useState('')
-  const [selected, setSelected] = useState([])
-  const [loading, setLoading] = useState(true)
+function stockStatus(p) {
+  if (Number(p.totalStock) <= 0) return 'out'
+  if (p.stockStatus === 'low' || Number(p.totalStock) <= 5) return 'low'
+  return 'in stock'
+}
 
-  const load = useCallback(async (page = 1) => {
-    setLoading(true)
-    try {
-      const res = await listProducts({ page, pageSize: 20, search, categoryId, status, stockFilter })
-      setItems(res.data.items)
-      setPagination(res.data.pagination)
-      setSelected([])
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to load products')
-    } finally {
-      setLoading(false)
-    }
-  }, [categoryId, search, status, stockFilter])
+export default function Products() {
+  const { showToast } = useSnackbar()
+  const navigate = useNavigate()
+  const [filters, setFilters] = useState({ search: '', categoryId: '', status: '', stockFilter: '' })
+  const [categories, setCategories] = useState([])
+  const [selected, setSelected] = useState([])
+  const [deleteId, setDeleteId] = useState(null)
+
+  const fetcher = useMemo(() => (params) => listProducts(params), [])
+  const { items, pagination, loading, error, page, pageSize, setPage, setPageSize, reload } =
+    usePaginatedList(fetcher, filters)
 
   useEffect(() => {
-    listCategories().then((r) => setCategories(r.data.items)).catch(() => {})
-    load(1)
-  }, [load])
+    listCategories()
+      .then((r) => setCategories(r.data.items || []))
+      .catch(() => {})
+  }, [])
+
+  const allChecked = items.length > 0 && selected.length === items.length
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Products</h1>
-          <p className="text-sm text-slate-500">Manage catalog, variants, and individual visibility.</p>
-        </div>
-        <Link
-          to="/admin/products/new"
-          className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white"
-        >
-          Add product
-        </Link>
-      </div>
+    <>
+      <PageHeader
+        title="Products"
+        subtitle="Catalog, variants, tax, and student visibility."
+        actions={
+          <Button
+            component={RouterLink}
+            to="/admin/products/new"
+            variant="contained"
+            startIcon={<AddOutlinedIcon />}
+          >
+            Add product
+          </Button>
+        }
+      />
 
-      <div className="flex flex-wrap gap-2 rounded-xl border bg-white p-3">
-        <input
-          className="min-w-[180px] flex-1 rounded-lg border px-3 py-2 text-sm"
-          placeholder="Search products"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 2 }} useFlexGap flexWrap="wrap">
+        <TextField
+          placeholder="Search name / SKU"
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+          sx={{ minWidth: 220, flex: 1 }}
         />
-        <select className="rounded-lg border px-3 py-2 text-sm" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-          <option value="">All categories</option>
+        <TextField
+          select
+          label="Category"
+          value={filters.categoryId}
+          onChange={(e) => setFilters((f) => ({ ...f, categoryId: e.target.value }))}
+          sx={{ minWidth: 160 }}
+        >
+          <MenuItem value="">All</MenuItem>
           {categories.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+            <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
           ))}
-        </select>
-        <select className="rounded-lg border px-3 py-2 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">All status</option>
-          <option value="draft">Draft</option>
-          <option value="active">Active</option>
-          <option value="archived">Archived</option>
-        </select>
-        <select className="rounded-lg border px-3 py-2 text-sm" value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}>
-          <option value="">All stock</option>
-          <option value="low">Low stock</option>
-          <option value="out">Out of stock</option>
-        </select>
-        <button type="button" onClick={() => load(1)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">Apply</button>
-      </div>
+        </TextField>
+        <TextField
+          select
+          label="Status"
+          value={filters.status}
+          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+          sx={{ minWidth: 130 }}
+        >
+          <MenuItem value="">All</MenuItem>
+          <MenuItem value="draft">Draft</MenuItem>
+          <MenuItem value="active">Active</MenuItem>
+          <MenuItem value="archived">Archived</MenuItem>
+        </TextField>
+        <TextField
+          select
+          label="Stock"
+          value={filters.stockFilter}
+          onChange={(e) => setFilters((f) => ({ ...f, stockFilter: e.target.value }))}
+          sx={{ minWidth: 140 }}
+        >
+          <MenuItem value="">All</MenuItem>
+          <MenuItem value="in">In stock</MenuItem>
+          <MenuItem value="low">Low</MenuItem>
+          <MenuItem value="out">Out</MenuItem>
+        </TextField>
+      </Stack>
 
       {selected.length > 0 && (
-        <div className="flex gap-2">
+        <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
           {['active', 'draft', 'archived'].map((s) => (
-            <button
+            <Button
               key={s}
-              type="button"
-              className="rounded-lg border px-3 py-1.5 text-sm capitalize"
+              size="small"
+              variant="outlined"
               onClick={async () => {
                 await bulkProductStatus(selected, s)
-                toast.success(`Set to ${s}`)
-                load(pagination.page)
+                showToast(`Set ${selected.length} to ${s}`, 'success')
+                setSelected([])
+                reload()
               }}
             >
               Set {s}
-            </button>
+            </Button>
           ))}
-        </div>
+        </Stack>
       )}
 
-      <div className="overflow-x-auto rounded-xl border bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">
-                <input
-                  type="checkbox"
-                  checked={items.length > 0 && selected.length === items.length}
-                  onChange={(e) => setSelected(e.target.checked ? items.map((i) => i.id) : [])}
-                />
-              </th>
-              <th className="px-3 py-3">Image</th>
-              <th className="px-3 py-3">Name</th>
-              <th className="px-3 py-3">Category</th>
-              <th className="px-3 py-3">Status</th>
-              <th className="px-3 py-3">Stock</th>
-              <th className="px-3 py-3">Variants</th>
-              <th className="px-3 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Loading…</td></tr>
-            )}
-            {!loading && items.length === 0 && (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">No products</td></tr>
-            )}
-            {items.map((p) => (
-              <tr key={p.id} className="border-t">
-                <td className="px-3 py-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(p.id)}
-                    onChange={() =>
-                      setSelected((s) => (s.includes(p.id) ? s.filter((x) => x !== p.id) : [...s, p.id]))
-                    }
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  {p.primaryImage ? (
-                    <img src={p.primaryImage} alt="" className="h-10 w-10 rounded object-cover" />
-                  ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-100 text-xs text-slate-400">—</div>
-                  )}
-                </td>
-                <td className="px-3 py-2 font-medium">{p.name}</td>
-                <td className="px-3 py-2">{p.categoryName}</td>
-                <td className="px-3 py-2 capitalize">{p.status}</td>
-                <td className="px-3 py-2">{p.totalStock}</td>
-                <td className="px-3 py-2">{p.variantCount}</td>
-                <td className="px-3 py-2 space-x-2">
-                  <Link className="text-indigo-600" to={`/admin/products/${p.id}`}>Edit</Link>
-                  <button
-                    type="button"
-                    className="text-slate-600"
-                    onClick={async () => {
-                      const res = await duplicateProduct(p.id)
-                      toast.success('Duplicated')
-                      window.location.assign(`/admin/products/${res.data.id}`)
-                    }}
-                  >
-                    Duplicate
-                  </button>
-                  {isSuperAdmin && (
-                    <button
-                      type="button"
-                      className="text-red-600"
-                      onClick={async () => {
-                        if (!window.confirm('Delete product?')) return
-                        try {
-                          await deleteProduct(p.id)
-                          toast.success('Deleted')
-                          load(pagination.page)
-                        } catch (err) {
-                          toast.error(err.response?.data?.message || 'Delete failed')
-                        }
-                      }}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={[
+          {
+            id: 'select',
+            label: (
+              <Checkbox
+                size="small"
+                checked={allChecked}
+                onChange={(e) => setSelected(e.target.checked ? items.map((i) => i.id) : [])}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ),
+            width: 48,
+            render: (r) => (
+              <Checkbox
+                size="small"
+                checked={selected.includes(r.id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() =>
+                  setSelected((s) => (s.includes(r.id) ? s.filter((x) => x !== r.id) : [...s, r.id]))
+                }
+              />
+            ),
+          },
+          { id: 'id', label: 'ID', width: 56, render: (r) => r.id },
+          {
+            id: 'image',
+            label: 'Image',
+            width: 64,
+            render: (r) => (
+              <Avatar variant="rounded" src={r.primaryImage || undefined} alt="" sx={{ width: 40, height: 40 }}>
+                —
+              </Avatar>
+            ),
+          },
+          { id: 'name', label: 'Name', render: (r) => r.name },
+          { id: 'sku', label: 'SKU', render: (r) => r.sku || '—' },
+          { id: 'status', label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+          { id: 'categories', label: 'Categories', render: (r) => r.categoryName },
+          {
+            id: 'price',
+            label: 'Price range',
+            render: (r) =>
+              r.minPrice === r.maxPrice
+                ? formatINR(r.minPrice ?? r.basePrice)
+                : `${formatINR(r.minPrice)} – ${formatINR(r.maxPrice)}`,
+          },
+          { id: 'stock', label: 'Total stock', render: (r) => r.totalStock },
+          {
+            id: 'stockStatus',
+            label: 'Stock',
+            render: (r) => <StatusBadge status={stockStatus(r)} />,
+          },
+          {
+            id: 'visible',
+            label: 'Visible individually',
+            render: (r) => (
+              <Switch
+                size="small"
+                checked={Boolean(r.visibleIndividually)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={async (e) => {
+                  await updateProduct(r.id, { visibleIndividually: e.target.checked })
+                  reload()
+                }}
+              />
+            ),
+          },
+          { id: 'gst', label: 'GST', render: (r) => `${Number(r.gstRate ?? r.taxPercent ?? 0)}%` },
+          { id: 'created', label: 'Created', render: (r) => formatDate(r.createdAt) },
+          {
+            id: 'actions',
+            label: '',
+            align: 'right',
+            render: (r) => (
+              <Stack direction="row" spacing={0.5} justifyContent="flex-end" onClick={(e) => e.stopPropagation()}>
+                <Button size="small" component={RouterLink} to={`/admin/products/${r.id}`}>
+                  Edit
+                </Button>
+                <Button
+                  size="small"
+                  onClick={async () => {
+                    const res = await duplicateProduct(r.id)
+                    showToast('Duplicated', 'success')
+                    navigate(`/admin/products/${res.data.id}`)
+                  }}
+                >
+                  Copy
+                </Button>
+                <Button size="small" color="error" onClick={() => setDeleteId(r.id)}>
+                  Delete
+                </Button>
+              </Stack>
+            ),
+          },
+        ]}
+        rows={items}
+        loading={loading}
+        error={error}
+        page={page}
+        pageSize={pageSize}
+        total={pagination.total}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        onRowClick={(r) => navigate(`/admin/products/${r.id}`)}
+        emptyTitle="No products"
+        emptyDescription="Add a product with variants to start selling."
+      />
 
-      <div className="flex justify-between text-sm">
-        <p className="text-slate-500">Page {pagination.page} / {pagination.totalPages}</p>
-        <div className="flex gap-2">
-          <button type="button" disabled={pagination.page <= 1} className="rounded border px-3 py-1 disabled:opacity-40" onClick={() => load(pagination.page - 1)}>Prev</button>
-          <button type="button" disabled={pagination.page >= pagination.totalPages} className="rounded border px-3 py-1 disabled:opacity-40" onClick={() => load(pagination.page + 1)}>Next</button>
-        </div>
-      </div>
-    </div>
+      <ConfirmDialog
+        open={Boolean(deleteId)}
+        title="Delete product?"
+        message="Products that appear on orders cannot be deleted — archive them instead."
+        onClose={() => setDeleteId(null)}
+        onConfirm={async () => {
+          try {
+            await deleteProduct(deleteId)
+            showToast('Deleted', 'success')
+            setDeleteId(null)
+            reload()
+          } catch (err) {
+            showToast(err.response?.data?.message || 'Delete failed', 'error')
+          }
+        }}
+      />
+    </>
   )
 }

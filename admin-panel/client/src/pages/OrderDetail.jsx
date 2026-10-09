@@ -1,128 +1,274 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import toast from 'react-hot-toast'
-import { getOrder, updateOrderPayment, updateOrderStatus } from '../api/admin'
+import { Link as RouterLink, useParams } from 'react-router-dom'
+import {
+  Button,
+  Card,
+  CardContent,
+  Grid,
+  MenuItem,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material'
+import PageHeader from '../components/PageHeader'
+import StatusBadge from '../components/StatusBadge'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import { useSnackbar } from '../context/SnackbarContext'
+import { formatDateTime, formatINR } from '../utils/format'
+import { getOrder, updateOrderStatus } from '../api/admin'
+import api from '../api/client'
+
+const STATUSES = ['placed', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled', 'returned']
 
 export default function OrderDetail() {
   const { id } = useParams()
+  const { showToast } = useSnackbar()
   const [data, setData] = useState(null)
   const [status, setStatus] = useState('confirmed')
   const [note, setNote] = useState('')
+  const [tracking, setTracking] = useState({ trackingNumber: '', courier: '', trackingUrl: '' })
+  const [refund, setRefund] = useState({ amount: '', reason: '' })
+  const [loading, setLoading] = useState(true)
 
   async function load() {
+    setLoading(true)
     try {
       const res = await getOrder(id)
       setData(res.data)
       setStatus(res.data.order.status)
+      setTracking({
+        trackingNumber: res.data.order.trackingNumber || '',
+        courier: res.data.order.courier || '',
+        trackingUrl: res.data.order.trackingUrl || '',
+      })
+      setRefund({ amount: String(res.data.order.total || ''), reason: '' })
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to load')
+      showToast(err.response?.data?.message || 'Failed to load', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [id])
+  useEffect(() => {
+    load()
+  }, [id])
 
-  if (!data) return <p className="text-slate-500">Loading…</p>
-  const { order, items, history } = data
+  if (loading || !data) {
+    return (
+      <>
+        <PageHeader title="Order" breadcrumbs={[{ label: 'Orders', to: '/admin/orders' }]} />
+        <LoadingSkeleton rows={8} />
+      </>
+    )
+  }
+
+  const { order, items, history, payment } = data
   const addr = order.addressSnapshot || {}
+  const isPaytmPaid = order.paymentMethod === 'paytm' && ['paid', 'partially_refunded'].includes(order.paymentStatus)
 
   return (
-    <div className="space-y-4">
-      <Link to="/admin/orders" className="text-sm text-indigo-600">← Orders</Link>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">{order.orderNumber}</h1>
-          <p className="text-sm text-slate-500 capitalize">{order.type} · {order.status} · {order.paymentStatus}</p>
-        </div>
-        <Link to={`/admin/orders/packing?ids=${order.id}`} target="_blank" className="rounded-lg border px-3 py-2 text-sm">
-          Print packing slip
-        </Link>
-      </div>
+    <>
+      <PageHeader
+        title={order.orderNumber}
+        subtitle={`${order.studentName} · ${order.admissionNumber}`}
+        breadcrumbs={[{ label: 'Orders', to: '/admin/orders' }, { label: order.orderNumber }]}
+        actions={
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button
+              variant="outlined"
+              href={`/api/admin/gst/download?type=invoice&orderIds=${order.id}`}
+            >
+              Download GST invoice
+            </Button>
+            <Button
+              variant="outlined"
+              href={`/api/admin/gst/download?type=packing-slip&orderIds=${order.id}`}
+            >
+              Download packing slip
+            </Button>
+            <Button component={RouterLink} to="/admin/orders" variant="outlined">Back</Button>
+          </Stack>
+        }
+      />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border bg-white p-4 text-sm">
-          <h2 className="mb-2 font-semibold">Student & address</h2>
-          <p>{order.admissionNumber} · {order.studentName} · {order.houseColor}</p>
-          <p className="mt-2">{addr.parentName}</p>
-          <p>{addr.address1}</p>
-          <p>{addr.address2}</p>
-          <p>{addr.city}, {addr.state} {addr.zipcode}</p>
-          <p>{addr.phone || data.studentPhone || '—'}</p>
-        </section>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Summary</Typography>
+              <Stack spacing={0.5}>
+                <Typography>Status: <StatusBadge status={order.status} /></Typography>
+                <Typography>Type: <StatusBadge status={order.type} /></Typography>
+                <Typography>Subtotal: {formatINR(order.subtotal)}</Typography>
+                <Typography>Tax: {formatINR(order.tax)}</Typography>
+                <Typography>Shipping: {formatINR(order.shipping)}</Typography>
+                <Typography fontWeight={700}>Total: {formatINR(order.total)}</Typography>
+                {order.invoiceNumber && <Typography>Invoice: {order.invoiceNumber}</Typography>}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Billing / Shipping</Typography>
+              <Typography>{order.studentName} ({order.admissionNumber}) · {order.houseColor}</Typography>
+              <Typography>{addr.parentName}</Typography>
+              <Typography>{addr.address1}</Typography>
+              <Typography>{addr.address2}</Typography>
+              <Typography>{addr.city}, {addr.state} {addr.zipcode}</Typography>
+              <Typography>{addr.phone || data.studentPhone || '—'}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
 
-        <section className="rounded-xl border bg-white p-4 text-sm">
-          <h2 className="mb-2 font-semibold">Totals</h2>
-          <p>Subtotal: ₹{order.subtotal}</p>
-          <p>Tax: ₹{order.tax}</p>
-          <p>Shipping: ₹{order.shipping}</p>
-          <p className="font-bold">Total: ₹{order.total}</p>
-          <p className="mt-2 capitalize">Payment: {order.paymentMethod} · {order.paymentStatus}</p>
-          <div className="mt-3 flex gap-2">
-            <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-white" onClick={async () => { await updateOrderPayment(id, 'paid'); toast.success('Marked paid'); load() }}>Mark paid</button>
-            <button type="button" className="rounded-lg border px-3 py-1.5" onClick={async () => { await updateOrderPayment(id, 'refunded'); toast.success('Refunded'); load() }}>Refund</button>
-          </div>
-        </section>
-      </div>
+        <Grid size={{ xs: 12 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Line items</Typography>
+              <Stack spacing={1}>
+                {items.map((i) => (
+                  <Stack key={i.id} direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" sx={{ borderBottom: 1, borderColor: 'divider', pb: 1 }}>
+                    <Typography variant="body2">
+                      {i.nameSnapshot} · {i.skuSnapshot} · HSN {i.hsnCode || '—'} · {i.optionSnapshot || '—'}
+                    </Typography>
+                    <Typography variant="body2">
+                      ×{i.quantity} · {formatINR(i.unitPrice)} · GST {i.gstRate ?? '—'}% · {formatINR(i.lineTotal)}
+                    </Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
 
-      <section className="overflow-x-auto rounded-xl border bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Item</th>
-              <th className="px-3 py-3">SKU</th>
-              <th className="px-3 py-3">Options</th>
-              <th className="px-3 py-3">Qty</th>
-              <th className="px-3 py-3">Unit</th>
-              <th className="px-3 py-3">Line</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((i) => (
-              <tr key={i.id} className="border-t">
-                <td className="px-3 py-2">{i.nameSnapshot}</td>
-                <td className="px-3 py-2 font-mono text-xs">{i.skuSnapshot}</td>
-                <td className="px-3 py-2">{i.optionSnapshot}</td>
-                <td className="px-3 py-2">{i.quantity}</td>
-                <td className="px-3 py-2">₹{i.unitPrice}</td>
-                <td className="px-3 py-2">₹{i.lineTotal}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Payment</Typography>
+              <Typography>Method: {order.paymentMethod}</Typography>
+              <Typography>Status: <StatusBadge status={order.paymentStatus} /></Typography>
+              {payment && (
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Typography variant="body2">Paytm order: {payment.paytmOrderId}</Typography>
+                  <Typography variant="body2">Txn: {payment.txnId || '—'}</Typography>
+                  <Typography variant="body2">Bank txn: {payment.bankTxnId || '—'}</Typography>
+                  <Typography variant="body2">{payment.respMsg}</Typography>
+                </Stack>
+              )}
+              <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={async () => {
+                    try {
+                      await api.post(`/admin/orders/${id}/paytm/status`)
+                      showToast('Status refreshed', 'success')
+                      load()
+                    } catch (err) {
+                      showToast(err.response?.data?.message || 'Check failed', 'error')
+                    }
+                  }}
+                >
+                  Check status with Paytm
+                </Button>
+              </Stack>
+              {isPaytmPaid && (
+                <Stack spacing={1} sx={{ mt: 2 }}>
+                  <TextField label="Refund amount" type="number" value={refund.amount} onChange={(e) => setRefund((r) => ({ ...r, amount: e.target.value }))} />
+                  <TextField label="Reason" value={refund.reason} onChange={(e) => setRefund((r) => ({ ...r, reason: e.target.value }))} />
+                  <Button
+                    variant="contained"
+                    color="warning"
+                    onClick={async () => {
+                      try {
+                        await api.post(`/admin/orders/${id}/paytm/refund`, {
+                          amount: Number(refund.amount),
+                          reason: refund.reason,
+                        })
+                        showToast('Refund requested', 'success')
+                        load()
+                      } catch (err) {
+                        showToast(err.response?.data?.message || 'Refund failed', 'error')
+                      }
+                    }}
+                  >
+                    Refund
+                  </Button>
+                </Stack>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
 
-      <section className="rounded-xl border bg-white p-4">
-        <h2 className="mb-3 font-semibold">Update status</h2>
-        <div className="flex flex-wrap gap-2">
-          <select className="rounded-lg border px-3 py-2 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
-            {['placed','confirmed','packed','shipped','delivered','cancelled','returned'].map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <input className="min-w-[200px] flex-1 rounded-lg border px-3 py-2 text-sm" placeholder="Optional note" value={note} onChange={(e) => setNote(e.target.value)} />
-          <button
-            type="button"
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
-            onClick={async () => {
-              try {
-                await updateOrderStatus(id, { status, note })
-                toast.success('Status updated')
-                setNote('')
-                load()
-              } catch (err) {
-                toast.error(err.response?.data?.message || 'Failed')
-              }
-            }}
-          >
-            Save status
-          </button>
-        </div>
-        <ul className="mt-4 space-y-2 text-sm">
-          {history.map((h) => (
-            <li key={h.id} className="border-l-2 border-indigo-200 pl-3">
-              <strong className="capitalize">{h.status}</strong> · {h.changedBy || '—'} · {new Date(h.createdAt).toLocaleString()}
-              {h.note && <p className="text-slate-500">{h.note}</p>}
-            </li>
-          ))}
-        </ul>
-      </section>
-    </div>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Update status</Typography>
+              <Stack spacing={2}>
+                <TextField select label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
+                  {STATUSES.map((s) => (
+                    <MenuItem key={s} value={s}>{s}</MenuItem>
+                  ))}
+                </TextField>
+                <TextField label="Note" value={note} onChange={(e) => setNote(e.target.value)} />
+                <Button
+                  variant="contained"
+                  onClick={async () => {
+                    await updateOrderStatus(id, { status, note })
+                    showToast('Status updated', 'success')
+                    setNote('')
+                    load()
+                  }}
+                >
+                  Save status
+                </Button>
+              </Stack>
+              <Typography fontWeight={700} sx={{ mt: 3, mb: 1 }}>History</Typography>
+              {history.map((h) => (
+                <Typography key={h.id} variant="body2">
+                  {h.status} · {h.changedBy} · {formatDateTime(h.createdAt)} {h.note ? `· ${h.note}` : ''}
+                </Typography>
+              ))}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Order notes</Typography>
+              <Typography variant="body2">{order.notes || '—'}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Shipping / tracking</Typography>
+              <Stack spacing={2}>
+                <TextField label="Courier" value={tracking.courier} onChange={(e) => setTracking((t) => ({ ...t, courier: e.target.value }))} />
+                <TextField label="Tracking number" value={tracking.trackingNumber} onChange={(e) => setTracking((t) => ({ ...t, trackingNumber: e.target.value }))} />
+                <TextField label="Tracking URL" value={tracking.trackingUrl} onChange={(e) => setTracking((t) => ({ ...t, trackingUrl: e.target.value }))} />
+                <Button
+                  variant="outlined"
+                  onClick={async () => {
+                    try {
+                      await api.patch(`/admin/orders/${id}/shipping`, tracking)
+                      showToast('Shipping saved', 'success')
+                    } catch (err) {
+                      showToast(err.response?.data?.message || 'Save failed', 'error')
+                    }
+                  }}
+                >
+                  Save tracking
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    </>
   )
 }

@@ -1,20 +1,46 @@
 import { useEffect, useState } from 'react'
-import toast from 'react-hot-toast'
-import { useAuth } from '../context/AuthContext'
+import {
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControlLabel,
+  Stack,
+  Switch,
+  TextField,
+} from '@mui/material'
+import AddOutlinedIcon from '@mui/icons-material/AddOutlined'
+import PageHeader from '../components/PageHeader'
+import DataTable from '../components/DataTable'
+import StatusBadge from '../components/StatusBadge'
+import ConfirmDialog from '../components/ConfirmDialog'
+import { useSnackbar } from '../context/SnackbarContext'
 import { createCategory, deleteCategory, listCategories, updateCategory } from '../api/catalog'
 
+const empty = { name: '', sortOrder: 0, isActive: true }
+
 export default function Categories() {
-  const { isSuperAdmin } = useAuth()
+  const { showToast } = useSnackbar()
   const [items, setItems] = useState([])
-  const [form, setForm] = useState({ name: '', sortOrder: 0, isActive: true })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState(empty)
+  const [deleteId, setDeleteId] = useState(null)
 
   async function load() {
+    setLoading(true)
+    setError(null)
     try {
       const res = await listCategories()
-      setItems(res.data.items)
+      setItems(res.data.items || [])
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to load')
+      setError(err.response?.data?.message || 'Failed to load categories')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -22,117 +48,134 @@ export default function Categories() {
     load()
   }, [])
 
-  async function onSubmit(e) {
+  async function onSave(e) {
     e.preventDefault()
     try {
-      if (editing) {
-        await updateCategory(editing.id, form)
-        toast.success('Updated')
-      } else {
-        await createCategory(form)
-        toast.success('Created')
-      }
-      setForm({ name: '', sortOrder: 0, isActive: true })
+      if (editing) await updateCategory(editing.id, form)
+      else await createCategory(form)
+      showToast(editing ? 'Category updated' : 'Category created', 'success')
+      setFormOpen(false)
       setEditing(null)
+      setForm(empty)
       load()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Save failed')
+      showToast(err.response?.data?.message || 'Save failed', 'error')
     }
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Categories</h1>
-      <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-2 rounded-xl border bg-white p-4">
-        <label className="text-sm">
-          Name
-          <input
-            className="mt-1 block rounded-lg border px-3 py-2"
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            required
-          />
-        </label>
-        <label className="text-sm">
-          Sort
-          <input
-            type="number"
-            className="mt-1 block w-24 rounded-lg border px-3 py-2"
-            value={form.sortOrder}
-            onChange={(e) => setForm((f) => ({ ...f, sortOrder: Number(e.target.value) }))}
-          />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.isActive}
-            onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
-          />
-          Active
-        </label>
-        <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white">
-          {editing ? 'Update' : 'Add'}
-        </button>
-        {editing && (
-          <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => { setEditing(null); setForm({ name: '', sortOrder: 0, isActive: true }) }}>
-            Cancel
-          </button>
-        )}
-      </form>
+    <>
+      <PageHeader
+        title="Categories"
+        subtitle="Organize products for the student catalog."
+        actions={
+          <Button
+            variant="contained"
+            startIcon={<AddOutlinedIcon />}
+            onClick={() => {
+              setEditing(null)
+              setForm(empty)
+              setFormOpen(true)
+            }}
+          >
+            Add category
+          </Button>
+        }
+      />
 
-      <div className="overflow-x-auto rounded-xl border bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Name</th>
-              <th className="px-3 py-3">Slug</th>
-              <th className="px-3 py-3">Sort</th>
-              <th className="px-3 py-3">Active</th>
-              <th className="px-3 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((c) => (
-              <tr key={c.id} className="border-t">
-                <td className="px-3 py-2">{c.name}</td>
-                <td className="px-3 py-2">{c.slug}</td>
-                <td className="px-3 py-2">{c.sortOrder}</td>
-                <td className="px-3 py-2">{c.isActive ? 'Yes' : 'No'}</td>
-                <td className="px-3 py-2 space-x-2">
-                  <button
-                    type="button"
-                    className="text-indigo-600"
-                    onClick={() => {
-                      setEditing(c)
-                      setForm({ name: c.name, sortOrder: c.sortOrder, isActive: c.isActive })
-                    }}
-                  >
-                    Edit
-                  </button>
-                  {isSuperAdmin && (
-                    <button
-                      type="button"
-                      className="text-red-600"
-                      onClick={async () => {
-                        if (!window.confirm('Delete category?')) return
-                        try {
-                          await deleteCategory(c.id)
-                          toast.success('Deleted')
-                          load()
-                        } catch (err) {
-                          toast.error(err.response?.data?.message || 'Delete failed')
-                        }
-                      }}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      <DataTable
+        columns={[
+          { id: 'name', label: 'Name', render: (r) => r.name },
+          { id: 'slug', label: 'Slug', render: (r) => r.slug },
+          { id: 'sortOrder', label: 'Sort', render: (r) => r.sortOrder },
+          {
+            id: 'isActive',
+            label: 'Status',
+            render: (r) => <StatusBadge status={r.isActive ? 'active' : 'archived'} />,
+          },
+          {
+            id: 'actions',
+            label: '',
+            align: 'right',
+            render: (r) => (
+              <Stack direction="row" spacing={1} justifyContent="flex-end" onClick={(e) => e.stopPropagation()}>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setEditing(r)
+                    setForm({ name: r.name, sortOrder: r.sortOrder, isActive: r.isActive })
+                    setFormOpen(true)
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button size="small" color="error" onClick={() => setDeleteId(r.id)}>
+                  Delete
+                </Button>
+              </Stack>
+            ),
+          },
+        ]}
+        rows={items}
+        loading={loading}
+        error={error}
+        emptyTitle="No categories yet"
+        emptyDescription="Create a category to group products."
+      />
+
+      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{editing ? 'Edit category' : 'Add category'}</DialogTitle>
+        <Box component="form" onSubmit={onSave}>
+          <DialogContent>
+            <Stack spacing={2}>
+              <TextField
+                label="Name"
+                required
+                fullWidth
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
+              <TextField
+                label="Sort order"
+                type="number"
+                fullWidth
+                value={form.sortOrder}
+                onChange={(e) => setForm((f) => ({ ...f, sortOrder: Number(e.target.value) }))}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={form.isActive}
+                    onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
+                  />
+                }
+                label="Active"
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setFormOpen(false)}>Cancel</Button>
+            <Button type="submit" variant="contained">Save</Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteId)}
+        title="Delete category?"
+        message="Categories with products cannot be deleted — deactivate them instead."
+        onClose={() => setDeleteId(null)}
+        onConfirm={async () => {
+          try {
+            await deleteCategory(deleteId)
+            showToast('Deleted', 'success')
+            setDeleteId(null)
+            load()
+          } catch (err) {
+            showToast(err.response?.data?.message || 'Delete failed', 'error')
+          }
+        }}
+      />
+    </>
   )
 }

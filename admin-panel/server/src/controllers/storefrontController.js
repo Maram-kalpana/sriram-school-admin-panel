@@ -4,6 +4,7 @@ const AppError = require('../utils/AppError');
 const { resolveCatalogMode, loadSettingsMap } = require('../services/catalogMode');
 const stockService = require('../services/stock');
 const { nextOrderNumber } = require('../utils/orderNumber');
+const { applyOrderGst, isIntraState, splitLine, round2 } = require('../utils/gst');
 
 async function login(req, res, next) {
   try {
@@ -204,7 +205,8 @@ async function placeOrder(req, res, next) {
         if (!variant || !variant.is_active) {
           throw new AppError('Variant unavailable', 400);
         }
-        if (variant.stock_qty < item.quantity) {
+        const available = Number(variant.stock_qty) - Number(variant.reserved_qty || 0);
+        if (available < item.quantity) {
           throw new AppError(`Insufficient stock for ${variant.sku}`, 400);
         }
         const product = await trx('products').where({ id: item.productId }).first();
@@ -219,12 +221,10 @@ async function placeOrder(req, res, next) {
         const lineTotal = unit * item.quantity;
         subtotal += lineTotal;
 
-        await stockService.changeStock(trx, {
+        await stockService.reserveStock(trx, {
           variantId: variant.id,
-          changeQty: -item.quantity,
-          reason: 'order',
-          adminUserId: null,
-          note: 'Storefront order',
+          quantity: item.quantity,
+          note: 'Storefront reserve',
         });
 
         lineRows.push({
@@ -236,19 +236,75 @@ async function placeOrder(req, res, next) {
           unit_price: unit,
           quantity: item.quantity,
           line_total: lineTotal,
+          hsn_code: product.hsn_code || null,
+          gst_rate: Number(product.gst_rate != null ? product.gst_rate : product.tax_percent || 0),
+          priceIncludesGst: product.price_includes_gst !== false && product.price_includes_gst !== 0,
         });
       }
 
+      let profile = null;
+      try {
+        profile = await trx('gst_profile').orderBy('id').first();
+      } catch {
+        profile = null;
+      }
+      const intraState = isIntraState(profile || { state: 'Telangana', state_code: '36' }, student);
+
       let total = subtotal;
       let tax = 0;
+      let taxableTotal = subtotal;
+      let cgstTotal = 0;
+      let sgstTotal = 0;
+      let igstTotal = 0;
       if (body.type === 'kit') {
         const kit = await trx('kits').where({ is_active: true }).orderBy('id', 'desc').first();
         if (!kit) throw new AppError('No active kit', 400);
-        subtotal = Number(kit.price);
-        total = subtotal + shipping;
+        const kitSplit = splitLine({
+          amount: Number(kit.price),
+          quantity: 1,
+          gstRate: 5,
+          priceIncludesGst: true,
+          intraState,
+        });
+        subtotal = kitSplit.lineTotal;
+        taxableTotal = kitSplit.taxableValue;
+        tax = kitSplit.tax;
+        cgstTotal = kitSplit.cgst;
+        sgstTotal = kitSplit.sgst;
+        igstTotal = kitSplit.igst;
+        total = round2(kitSplit.lineTotal + shipping);
+        if (lineRows[0]) {
+          lineRows[0].taxable_value = taxableTotal;
+          lineRows[0].cgst = cgstTotal;
+          lineRows[0].sgst = sgstTotal;
+          lineRows[0].igst = igstTotal;
+          lineRows[0].gst_rate = 5;
+          lineRows[0].hsn_code = lineRows[0].hsn_code || '6109';
+        }
       } else {
-        tax = 0;
-        total = subtotal + tax + shipping;
+        const gst = applyOrderGst(
+          lineRows.map((l) => ({
+            unitPrice: l.unit_price,
+            quantity: l.quantity,
+            gstRate: l.gst_rate,
+            priceIncludesGst: l.priceIncludesGst,
+          })),
+          { intraState }
+        );
+        gst.lines.forEach((g, i) => {
+          lineRows[i].taxable_value = g.taxableValue;
+          lineRows[i].cgst = g.cgst;
+          lineRows[i].sgst = g.sgst;
+          lineRows[i].igst = g.igst;
+          lineRows[i].line_total = g.lineTotal;
+        });
+        taxableTotal = gst.taxableTotal;
+        cgstTotal = gst.cgstTotal;
+        sgstTotal = gst.sgstTotal;
+        igstTotal = gst.igstTotal;
+        tax = gst.gstTotal;
+        subtotal = gst.itemsTotal;
+        total = round2(gst.itemsTotal + shipping);
       }
 
       const orderNumber = await nextOrderNumber(trx, prefix);
@@ -262,6 +318,7 @@ async function placeOrder(req, res, next) {
         phone: student.phone,
       };
 
+      const isPaytm = body.paymentMethod === 'paytm';
       const [oid] = await trx('orders').insert({
         order_number: orderNumber,
         student_id: student.id,
@@ -273,12 +330,30 @@ async function placeOrder(req, res, next) {
         tax,
         shipping,
         total,
+        taxable_total: taxableTotal,
+        cgst_total: cgstTotal,
+        sgst_total: sgstTotal,
+        igst_total: igstTotal,
+        stock_state: 'reserved',
         address_snapshot: JSON.stringify(addressSnapshot),
         notes: body.notes || null,
       });
 
       for (const line of lineRows) {
-        await trx('order_items').insert({ ...line, order_id: oid });
+        const { priceIncludesGst, ...rest } = line;
+        await trx('order_items').insert({ ...rest, order_id: oid });
+      }
+
+      if (!isPaytm) {
+        for (const line of lineRows) {
+          await stockService.finalizeReserved(trx, {
+            variantId: line.variant_id,
+            quantity: line.quantity,
+            orderId: oid,
+            note: 'COD — finalize stock',
+          });
+        }
+        await trx('orders').where({ id: oid }).update({ stock_state: 'finalized' });
       }
       await trx('order_status_history').insert({
         order_id: oid,

@@ -4,6 +4,37 @@ const db = require('../config/db');
 const AppError = require('../utils/AppError');
 const stockService = require('../services/stock');
 
+async function summary(req, res, next) {
+  try {
+    const [skus, units, low, out, valueRow] = await Promise.all([
+      db('product_variants').count({ c: '*' }).first(),
+      db('product_variants').sum({ c: 'stock_qty' }).first(),
+      db('product_variants')
+        .where('stock_qty', '>', 0)
+        .whereRaw('stock_qty <= low_stock_threshold')
+        .count({ c: '*' })
+        .first(),
+      db('product_variants').where({ stock_qty: 0 }).count({ c: '*' }).first(),
+      db('product_variants as v')
+        .join('products as p', 'p.id', 'v.product_id')
+        .select(db.raw('COALESCE(SUM(v.stock_qty * COALESCE(v.price_override, p.base_price)), 0) as value'))
+        .first(),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        totalSkus: Number(skus.c),
+        unitsInStock: Number(units.c || 0),
+        stockValue: Number(valueRow.value || 0),
+        lowStock: Number(low.c),
+        outOfStock: Number(out.c),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listVariants(req, res, next) {
   try {
     const schema = z.object({
@@ -146,22 +177,68 @@ async function movements(req, res, next) {
   }
 }
 
+async function exportRows() {
+  return db('product_variants as v')
+    .join('products as p', 'p.id', 'v.product_id')
+    .select(
+      'v.sku',
+      'p.name',
+      'v.option1_value',
+      'v.option2_value',
+      'v.stock_qty',
+      'v.low_stock_threshold',
+      db.raw('COALESCE(v.price_override, p.base_price) as unit_price')
+    );
+}
+
 async function exportCsv(req, res, next) {
   try {
-    const rows = await db('product_variants as v')
-      .join('products as p', 'p.id', 'v.product_id')
-      .select('v.sku', 'p.name', 'v.option1_value', 'v.option2_value', 'v.stock_qty', 'v.low_stock_threshold');
-    const lines = ['SKU,Product,Option1,Option2,Stock,Threshold'];
+    const format = req.query.format === 'xlsx' ? 'xlsx' : 'csv';
+    const rows = await exportRows();
+    if (format === 'xlsx') {
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      res.setHeader('Content-Disposition', 'attachment; filename="inventory.xlsx"');
+      return res.send(buf);
+    }
+    const lines = ['SKU,Product,Option1,Option2,Stock,Threshold,UnitPrice'];
     rows.forEach((r) => {
       lines.push(
-        [r.sku, r.name, r.option1_value || '', r.option2_value || '', r.stock_qty, r.low_stock_threshold]
+        [r.sku, r.name, r.option1_value || '', r.option2_value || '', r.stock_qty, r.low_stock_threshold, r.unit_price]
           .map((x) => `"${String(x).replace(/"/g, '""')}"`)
           .join(',')
       );
     });
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="inventory.csv"');
-    res.send(lines.join('\n'));
+    return res.send(lines.join('\n'));
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function lowStockReport(req, res, next) {
+  try {
+    const rows = await db('product_variants as v')
+      .join('products as p', 'p.id', 'v.product_id')
+      .whereRaw('v.stock_qty <= v.low_stock_threshold')
+      .select('v.sku', 'p.name', 'v.stock_qty', 'v.low_stock_threshold');
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Low stock');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename="low-stock.xlsx"');
+    res.send(buf);
   } catch (err) {
     next(err);
   }
@@ -253,10 +330,12 @@ async function bulkCommit(req, res, next) {
 }
 
 module.exports = {
+  summary,
   listVariants,
   adjustStock,
   movements,
   exportCsv,
+  lowStockReport,
   bulkPreview,
   bulkCommit,
 };

@@ -87,9 +87,90 @@ x-api-key: <STOREFRONT_API_KEY>
 | `GET` | `/api/storefront/catalog?admissionNumber=` | Kit or product catalog for that student |
 | `POST` | `/api/storefront/orders` | Place kit/individual order (transactional) |
 | `GET` | `/api/storefront/orders?admissionNumber=` | Student order history |
+| `POST` | `/api/storefront/payments/paytm/initiate` | Create/load pending Paytm order; returns `txnToken` (requires `x-api-key`) |
+| `POST` | `/api/storefront/payments/paytm/callback` | Paytm server/browser callback (**public**, checksum + status API; rate limited) |
+| `GET` | `/api/storefront/payments/paytm/status/:orderNumber` | Poll payment status after checkout (requires `x-api-key`) |
 
 Error shape (same as admin API):
 
 ```json
 { "success": false, "message": "...", "errors": [] }
 ```
+
+---
+
+## Paytm JS Checkout
+
+Paytm credentials are configured in the **admin Settings** UI (not env). Staging host: `securegw-stage.paytm.in`. Production host: `securegw.paytm.in`.
+
+### 1. Create a pending order and get a token
+
+`POST /api/storefront/payments/paytm/initiate` with `x-api-key` and either:
+
+- `{ orderNumber }` / `{ orderId }` for an existing pending order, or
+- the same body as `POST /api/storefront/orders` plus Paytm as the method (the API creates the order, **reserves stock**, `payment_status: pending`).
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "txnToken": "…",
+    "mid": "YOUR_MID",
+    "orderId": "SS-2026-000001-1710000000000",
+    "amount": "2499.00",
+    "orderNumber": "SS-2026-000001",
+    "host": "securegw-stage.paytm.in"
+  }
+}
+```
+
+### 2. Open Paytm Checkout JS
+
+Load the merchant script (staging or production host from `data.host`):
+
+```text
+https://{host}/merchantpgpui/checkoutjs/merchants/{MID}.js
+```
+
+Then invoke checkout with the `txnToken`, Paytm `orderId`, `mid`, and amount. Example:
+
+```js
+function onScriptLoad({ txnToken, orderId, mid, amount }) {
+  const config = {
+    root: '',
+    flow: 'DEFAULT',
+    data: { orderId, token: txnToken, tokenType: 'TXN_TOKEN', amount },
+    merchant: { mid },
+    handler: {
+      transactionStatus() {
+        /* optional UI; never mark paid from this callback alone */
+      },
+      notifyMerchant(eventName) {
+        if (eventName === 'APP_CLOSED') {
+          /* user dismissed checkout */
+        }
+      },
+    },
+  };
+  if (window.Paytm && window.Paytm.CheckoutJS) {
+    window.Paytm.CheckoutJS.init(config).then(() => {
+      window.Paytm.CheckoutJS.invoke();
+    });
+  }
+}
+```
+
+Do **not** treat the browser `transactionStatus` handler as proof of payment. The admin API verifies `CHECKSUMHASH` and then calls Paytm **Transaction Status** (`/v3/order/status`) before setting `payment_status = paid`.
+
+### 3. After redirect / close, poll status
+
+```http
+GET /api/storefront/payments/paytm/status/{orderNumber}
+x-api-key: <STOREFRONT_API_KEY>
+```
+
+Poll until `paymentStatus` is `paid` or `failed`. On success the order is `confirmed`, an invoice number is assigned, and reserved stock is finalized. Unpaid Paytm orders older than 30 minutes are expired by cron (stock reservation released).
+
+COD / pay-at-school orders skip Paytm: stock is finalized immediately when the order is placed.

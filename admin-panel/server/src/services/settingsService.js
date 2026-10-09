@@ -43,6 +43,10 @@ const DEFAULTS = {
     { id: 'paytm', label: 'Paytm', enabled: false },
     { id: 'cod', label: 'Cash on Delivery / Pay at school', enabled: true },
   ],
+  gst_email_to: '',
+  gst_email_time: '08:00',
+  gst_email_report_day: 'yesterday',
+  gst_email_timezone: 'Asia/Kolkata',
 };
 
 let cache = null;

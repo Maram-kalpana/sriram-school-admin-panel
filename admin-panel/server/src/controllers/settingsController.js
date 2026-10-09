@@ -31,6 +31,10 @@ const updateSchema = z.object({
   smtp_password: z.string().optional(),
   smtp_from_name: z.string().optional(),
   smtp_from_email: z.string().optional(),
+  gst_email_to: z.string().email().or(z.literal('')).optional(),
+  gst_email_time: z.string().optional(),
+  gst_email_report_day: z.string().optional(),
+  gst_email_timezone: z.string().optional(),
   payment_methods: z
     .array(
       z.object({
@@ -108,10 +112,21 @@ async function sendTestEmail(req, res, next) {
   }
 }
 
+async function testPaytm(req, res, next) {
+  try {
+    const paytmService = require('../services/paytmService');
+    const result = await paytmService.testConnection();
+    res.json({ success: true, data: result, message: result.resultMsg });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getSettings,
   updateSettings,
   uploadLogo,
   sendTestEmail,
+  testPaytm,
   updateSchema,
 };

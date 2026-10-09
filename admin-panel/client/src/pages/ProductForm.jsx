@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import toast from 'react-hot-toast'
+import { useNavigate, useParams } from 'react-router-dom'
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  FormControlLabel,
+  MenuItem,
+  Stack,
+  Switch,
+  TextField,
+  Typography,
+} from '@mui/material'
+import PageHeader from '../components/PageHeader'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import { useSnackbar } from '../context/SnackbarContext'
 import {
   createProduct,
   deleteProductImage,
@@ -11,7 +25,7 @@ import {
   uploadProductImages,
 } from '../api/catalog'
 
-const TABS = ['General', 'Images', 'Pricing', 'Variants', 'Visibility']
+const GST_RATES = [0, 5, 12, 18, 28]
 
 function slugify(s) {
   return String(s || '')
@@ -24,7 +38,7 @@ export default function ProductForm() {
   const { id } = useParams()
   const isNew = !id || id === 'new'
   const navigate = useNavigate()
-  const [tab, setTab] = useState(0)
+  const { showToast } = useSnackbar()
   const [categories, setCategories] = useState([])
   const [images, setImages] = useState([])
   const [opt1Name, setOpt1Name] = useState('Size')
@@ -40,11 +54,16 @@ export default function ProductForm() {
     status: 'draft',
     basePrice: 0,
     compareAtPrice: '',
+    hsnCode: '',
+    gstRate: 5,
+    priceIncludesGst: true,
     taxPercent: 5,
     visibleIndividually: true,
+    includeInKit: true,
     variants: [],
   })
   const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(!isNew)
 
   useEffect(() => {
     listCategories().then((r) => {
@@ -69,14 +88,19 @@ export default function ProductForm() {
           status: p.status,
           basePrice: p.basePrice,
           compareAtPrice: p.compareAtPrice ?? '',
-          taxPercent: p.taxPercent,
+          hsnCode: p.hsnCode || '',
+          gstRate: Number(p.gstRate ?? p.taxPercent ?? 5),
+          priceIncludesGst: p.priceIncludesGst !== false,
+          taxPercent: Number(p.gstRate ?? p.taxPercent ?? 5),
           visibleIndividually: p.visibleIndividually,
+          includeInKit: p.includeInKit !== false,
           variants: res.data.variants,
         })
         setImages(res.data.images)
       })
-      .catch((err) => toast.error(err.response?.data?.message || 'Failed to load'))
-  }, [id, isNew])
+      .catch((err) => showToast(err.response?.data?.message || 'Failed to load', 'error'))
+      .finally(() => setLoading(false))
+  }, [id, isNew, showToast])
 
   const matrixPreview = useMemo(() => {
     const v1 = opt1Values.split(',').map((x) => x.trim()).filter(Boolean)
@@ -101,24 +125,30 @@ export default function ProductForm() {
 
   function generateVariants() {
     const base = slugify(form.name || 'SKU').toUpperCase().replace(/-/g, '').slice(0, 12)
-    const next = matrixPreview.map((row) => {
-      const parts = [base, row.option1Value]
-      if (row.option2Value) parts.push(String(row.option2Value).toUpperCase().slice(0, 3))
-      return {
-        sku: parts.join('-'),
-        ...row,
-        priceOverride: null,
-        stockQty: 0,
-        lowStockThreshold: 5,
-        isActive: true,
-      }
-    })
+    const next = matrixPreview.map((row) => ({
+      sku: [base, row.option1Value, row.option2Value ? String(row.option2Value).toUpperCase().slice(0, 3) : null]
+        .filter(Boolean)
+        .join('-'),
+      ...row,
+      priceOverride: null,
+      stockQty: 0,
+      lowStockThreshold: 5,
+      barcode: '',
+      imageUrl: '',
+      isActive: true,
+    }))
     setForm((f) => ({ ...f, variants: next }))
-    toast.success(`Generated ${next.length} variants`)
+    showToast(`Generated ${next.length} variants`, 'success')
+  }
+
+  function patchVariant(idx, patch) {
+    const variants = [...form.variants]
+    variants[idx] = { ...variants[idx], ...patch }
+    setForm((f) => ({ ...f, variants }))
   }
 
   async function onSave(e) {
-    e.preventDefault()
+    e?.preventDefault?.()
     setSaving(true)
     try {
       const payload = {
@@ -126,63 +156,65 @@ export default function ProductForm() {
         categoryId: Number(form.categoryId),
         compareAtPrice: form.compareAtPrice === '' ? null : Number(form.compareAtPrice),
         basePrice: Number(form.basePrice),
-        taxPercent: Number(form.taxPercent),
+        gstRate: Number(form.gstRate),
+        taxPercent: Number(form.gstRate),
+        hsnCode: form.hsnCode || null,
         variants: form.variants,
       }
       if (isNew) {
         const res = await createProduct(payload)
-        toast.success('Product created')
+        showToast('Product created', 'success')
         navigate(`/admin/products/${res.data.product.id}`)
       } else {
         await updateProduct(id, payload)
-        toast.success('Product saved')
+        showToast('Product saved', 'success')
+        navigate(`/admin/products/${id}`)
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Save failed')
+      showToast(err.response?.data?.message || 'Save failed', 'error')
     } finally {
       setSaving(false)
     }
   }
 
+  if (loading) {
+    return (
+      <>
+        <PageHeader title="Product" breadcrumbs={[{ label: 'Products', to: '/admin/products' }]} />
+        <LoadingSkeleton rows={8} />
+      </>
+    )
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <Link to="/admin/products" className="text-sm text-indigo-600">← Products</Link>
-          <h1 className="text-2xl font-bold">{isNew ? 'Add product' : 'Edit product'}</h1>
-        </div>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={onSave}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-      </div>
+    <>
+      <PageHeader
+        title={isNew ? 'Add product' : 'Edit product'}
+        breadcrumbs={[
+          { label: 'Products', to: '/admin/products' },
+          { label: isNew ? 'New' : form.name || 'Edit' },
+        ]}
+        actions={
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" onClick={() => navigate(isNew ? '/admin/products' : `/admin/products/${id}`)}>
+              Cancel
+            </Button>
+            <Button variant="contained" disabled={saving} onClick={onSave}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </Stack>
+        }
+      />
 
-      <div className="flex flex-wrap gap-2 border-b">
-        {TABS.map((t, i) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(i)}
-            className={`border-b-2 px-3 py-2 text-sm font-medium ${
-              tab === i ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      <form onSubmit={onSave} className="rounded-xl border bg-white p-4">
-        {tab === 0 && (
-          <div className="grid max-w-2xl gap-3">
-            <label className="text-sm">
-              Name
-              <input
-                className="mt-1 w-full rounded-lg border px-3 py-2"
+      <Stack spacing={2} component="form" onSubmit={onSave}>
+        <Card variant="outlined">
+          <CardContent>
+            <Typography fontWeight={700} sx={{ mb: 2 }}>Basic</Typography>
+            <Stack spacing={2} maxWidth={720}>
+              <TextField
+                label="Name"
+                required
+                fullWidth
                 value={form.name}
                 onChange={(e) =>
                   setForm((f) => ({
@@ -191,306 +223,225 @@ export default function ProductForm() {
                     slug: isNew ? slugify(e.target.value) : f.slug,
                   }))
                 }
-                required
               />
-            </label>
-            <label className="text-sm">
-              Slug
-              <input
-                className="mt-1 w-full rounded-lg border px-3 py-2"
-                value={form.slug}
-                onChange={(e) => setForm((f) => ({ ...f, slug: slugify(e.target.value) }))}
-              />
-            </label>
-            <label className="text-sm">
-              Description
-              <textarea
-                className="mt-1 w-full rounded-lg border px-3 py-2"
-                rows={4}
+              <TextField label="Slug" fullWidth value={form.slug} onChange={(e) => setForm((f) => ({ ...f, slug: slugify(e.target.value) }))} />
+              <TextField
+                label="Description"
+                fullWidth
+                multiline
+                minRows={3}
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
-            </label>
-            <label className="text-sm">
-              Category
-              <select
-                className="mt-1 w-full rounded-lg border px-3 py-2"
+              <TextField
+                select
+                label="Category"
+                required
+                fullWidth
                 value={form.categoryId}
                 onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-                required
               >
-                <option value="">Select…</option>
                 {categories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
                 ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              Brand
-              <input
-                className="mt-1 w-full rounded-lg border px-3 py-2"
-                value={form.brand}
-                onChange={(e) => setForm((f) => ({ ...f, brand: e.target.value }))}
-              />
-            </label>
-            <label className="text-sm">
-              Status
-              <select
-                className="mt-1 w-full rounded-lg border px-3 py-2"
+              </TextField>
+              <TextField label="Brand" fullWidth value={form.brand} onChange={(e) => setForm((f) => ({ ...f, brand: e.target.value }))} />
+              <TextField
+                select
+                label="Status"
+                fullWidth
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
               >
-                <option value="draft">Draft</option>
-                <option value="active">Active</option>
-                <option value="archived">Archived</option>
-              </select>
-            </label>
-          </div>
-        )}
+                <MenuItem value="draft">Draft</MenuItem>
+                <MenuItem value="active">Active</MenuItem>
+                <MenuItem value="archived">Archived</MenuItem>
+              </TextField>
+            </Stack>
+          </CardContent>
+        </Card>
 
-        {tab === 1 && (
-          <div className="space-y-3">
+        <Card variant="outlined">
+          <CardContent>
+            <Typography fontWeight={700} sx={{ mb: 2 }}>Images</Typography>
             {isNew ? (
-              <p className="text-sm text-slate-500">Save the product first, then upload images.</p>
+              <Typography variant="body2" color="text.secondary">Save the product first, then upload images.</Typography>
             ) : (
-              <>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={async (e) => {
-                    if (!e.target.files?.length) return
-                    try {
-                      const res = await uploadProductImages(id, e.target.files)
-                      setImages((imgs) => [...imgs, ...res.data.images])
-                      toast.success('Uploaded')
-                    } catch (err) {
-                      toast.error(err.response?.data?.message || 'Upload failed')
-                    }
-                  }}
-                />
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Stack spacing={2}>
+                <Button variant="outlined" component="label" sx={{ alignSelf: 'flex-start' }}>
+                  Upload images
+                  <input
+                    hidden
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={async (e) => {
+                      if (!e.target.files?.length) return
+                      try {
+                        const res = await uploadProductImages(id, e.target.files)
+                        setImages((imgs) => [...imgs, ...res.data.images])
+                        showToast('Uploaded', 'success')
+                      } catch (err) {
+                        showToast(err.response?.data?.message || 'Upload failed', 'error')
+                      }
+                    }}
+                  />
+                </Button>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   {images.map((img, idx) => (
-                    <div key={img.id} className="rounded-lg border p-2">
-                      <img src={img.url} alt="" className="h-24 w-full rounded object-cover" />
-                      <div className="mt-2 flex flex-wrap gap-1 text-xs">
-                        <button
-                          type="button"
-                          className="text-indigo-600"
+                    <Box key={img.id} sx={{ width: 140, border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1 }}>
+                      <Box component="img" src={img.url} alt="" sx={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 1 }} />
+                      <Stack spacing={0.5} sx={{ mt: 1 }}>
+                        <Button
+                          size="small"
                           onClick={async () => {
-                            const next = images.map((im, i) => ({
-                              id: im.id,
-                              sortOrder: i,
-                              isPrimary: im.id === img.id,
-                            }))
+                            const next = images.map((im, i) => ({ id: im.id, sortOrder: i, isPrimary: im.id === img.id }))
                             await reorderProductImages(id, next)
-                            setImages((imgs) =>
-                              imgs.map((im) => ({ ...im, isPrimary: im.id === img.id }))
-                            )
-                            toast.success('Primary set')
+                            setImages((imgs) => imgs.map((im) => ({ ...im, isPrimary: im.id === img.id })))
                           }}
                         >
                           {img.isPrimary ? 'Primary' : 'Make primary'}
-                        </button>
-                        <button
-                          type="button"
-                          className="text-slate-600"
+                        </Button>
+                        <Button
+                          size="small"
                           disabled={idx === 0}
                           onClick={async () => {
                             const next = [...images]
                             ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
                             setImages(next)
-                            await reorderProductImages(
-                              id,
-                              next.map((im, i) => ({ id: im.id, sortOrder: i, isPrimary: im.isPrimary }))
-                            )
+                            await reorderProductImages(id, next.map((im, i) => ({ id: im.id, sortOrder: i, isPrimary: im.isPrimary })))
                           }}
                         >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          className="text-red-600"
+                          Move up
+                        </Button>
+                        <Button
+                          size="small"
+                          color="error"
                           onClick={async () => {
                             await deleteProductImage(id, img.id)
                             setImages((imgs) => imgs.filter((i) => i.id !== img.id))
                           }}
                         >
                           Delete
-                        </button>
-                      </div>
-                    </div>
+                        </Button>
+                      </Stack>
+                    </Box>
                   ))}
-                </div>
-              </>
+                </Stack>
+              </Stack>
             )}
-          </div>
-        )}
+          </CardContent>
+        </Card>
 
-        {tab === 2 && (
-          <div className="grid max-w-md gap-3">
-            <label className="text-sm">
-              Base price
-              <input
-                type="number"
-                step="0.01"
-                className="mt-1 w-full rounded-lg border px-3 py-2"
-                value={form.basePrice}
-                onChange={(e) => setForm((f) => ({ ...f, basePrice: e.target.value }))}
+        <Card variant="outlined">
+          <CardContent>
+            <Typography fontWeight={700} sx={{ mb: 2 }}>Pricing & Tax</Typography>
+            <Stack spacing={2} maxWidth={480}>
+              <TextField type="number" label="Regular price (₹)" fullWidth value={form.basePrice} onChange={(e) => setForm((f) => ({ ...f, basePrice: e.target.value }))} />
+              <TextField type="number" label="Sale / compare-at price" fullWidth value={form.compareAtPrice} onChange={(e) => setForm((f) => ({ ...f, compareAtPrice: e.target.value }))} />
+              <TextField label="HSN code" fullWidth value={form.hsnCode} onChange={(e) => setForm((f) => ({ ...f, hsnCode: e.target.value }))} />
+              <TextField
+                select
+                label="GST rate"
+                fullWidth
+                value={form.gstRate}
+                onChange={(e) => setForm((f) => ({ ...f, gstRate: Number(e.target.value), taxPercent: Number(e.target.value) }))}
+              >
+                {GST_RATES.map((r) => (
+                  <MenuItem key={r} value={r}>{r}%</MenuItem>
+                ))}
+              </TextField>
+              <FormControlLabel
+                control={<Switch checked={Boolean(form.priceIncludesGst)} onChange={(e) => setForm((f) => ({ ...f, priceIncludesGst: e.target.checked }))} />}
+                label="Price includes GST"
               />
-            </label>
-            <label className="text-sm">
-              Compare-at price
-              <input
-                type="number"
-                step="0.01"
-                className="mt-1 w-full rounded-lg border px-3 py-2"
-                value={form.compareAtPrice}
-                onChange={(e) => setForm((f) => ({ ...f, compareAtPrice: e.target.value }))}
+            </Stack>
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Typography fontWeight={700} sx={{ mb: 2 }}>Variants</Typography>
+            <Stack spacing={2}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <TextField label="Option 1 name" value={opt1Name} onChange={(e) => setOpt1Name(e.target.value)} />
+                <TextField label="Option 1 values" fullWidth value={opt1Values} onChange={(e) => setOpt1Values(e.target.value)} helperText="Comma-separated" />
+              </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <TextField label="Option 2 name" value={opt2Name} onChange={(e) => setOpt2Name(e.target.value)} />
+                <TextField label="Option 2 values (optional)" fullWidth value={opt2Values} onChange={(e) => setOpt2Values(e.target.value)} placeholder="Red,Yellow,Green,Blue" />
+              </Stack>
+              <Button variant="outlined" onClick={generateVariants} sx={{ alignSelf: 'flex-start' }}>
+                Generate matrix ({matrixPreview.length})
+              </Button>
+              {form.variants.map((v, idx) => (
+                <Stack key={v.id || v.sku || idx} direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+                  <TextField label="SKU" size="small" value={v.sku} onChange={(e) => patchVariant(idx, { sku: e.target.value })} sx={{ minWidth: 160 }} />
+                  <Typography variant="caption" sx={{ minWidth: 140 }}>
+                    {[v.option1Value, v.option2Value].filter(Boolean).join(' / ')}
+                  </Typography>
+                  <TextField label="Barcode" size="small" value={v.barcode || ''} onChange={(e) => patchVariant(idx, { barcode: e.target.value })} />
+                  <TextField
+                    type="number"
+                    label="Price override"
+                    size="small"
+                    value={v.priceOverride ?? ''}
+                    onChange={(e) => patchVariant(idx, { priceOverride: e.target.value === '' ? null : Number(e.target.value) })}
+                    sx={{ width: 130 }}
+                  />
+                  <TextField
+                    type="number"
+                    label="Stock"
+                    size="small"
+                    value={v.stockQty ?? 0}
+                    disabled={Boolean(v.id)}
+                    helperText={v.id ? 'Use Inventory' : ''}
+                    onChange={(e) => patchVariant(idx, { stockQty: Number(e.target.value) })}
+                    sx={{ width: 110 }}
+                  />
+                  <TextField
+                    type="number"
+                    label="Low stock"
+                    size="small"
+                    value={v.lowStockThreshold ?? 5}
+                    onChange={(e) => patchVariant(idx, { lowStockThreshold: Number(e.target.value) })}
+                    sx={{ width: 110 }}
+                  />
+                  <FormControlLabel
+                    control={<Switch checked={v.isActive !== false} onChange={(e) => patchVariant(idx, { isActive: e.target.checked })} />}
+                    label="Active"
+                  />
+                </Stack>
+              ))}
+            </Stack>
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Typography fontWeight={700} sx={{ mb: 1 }}>Stock</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Initial stock can be set on new variants. Existing stock is managed on the Inventory page (restock, adjust, bulk Excel).
+            </Typography>
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Typography fontWeight={700} sx={{ mb: 2 }}>Visibility</Typography>
+            <Stack>
+              <FormControlLabel
+                control={<Switch checked={Boolean(form.visibleIndividually)} onChange={(e) => setForm((f) => ({ ...f, visibleIndividually: e.target.checked }))} />}
+                label="Show to students as individual product"
               />
-            </label>
-            <label className="text-sm">
-              Tax %
-              <input
-                type="number"
-                step="0.01"
-                className="mt-1 w-full rounded-lg border px-3 py-2"
-                value={form.taxPercent}
-                onChange={(e) => setForm((f) => ({ ...f, taxPercent: e.target.value }))}
+              <FormControlLabel
+                control={<Switch checked={Boolean(form.includeInKit)} onChange={(e) => setForm((f) => ({ ...f, includeInKit: e.target.checked }))} />}
+                label="Include in kit"
               />
-            </label>
-          </div>
-        )}
-
-        {tab === 3 && (
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm">
-                Option 1 name
-                <input className="mt-1 w-full rounded-lg border px-3 py-2" value={opt1Name} onChange={(e) => setOpt1Name(e.target.value)} />
-              </label>
-              <label className="text-sm">
-                Option 1 values (comma-separated)
-                <input className="mt-1 w-full rounded-lg border px-3 py-2" value={opt1Values} onChange={(e) => setOpt1Values(e.target.value)} />
-              </label>
-              <label className="text-sm">
-                Option 2 name
-                <input className="mt-1 w-full rounded-lg border px-3 py-2" value={opt2Name} onChange={(e) => setOpt2Name(e.target.value)} />
-              </label>
-              <label className="text-sm">
-                Option 2 values (optional)
-                <input className="mt-1 w-full rounded-lg border px-3 py-2" value={opt2Values} onChange={(e) => setOpt2Values(e.target.value)} placeholder="Red,Yellow,Green,Blue" />
-              </label>
-            </div>
-            <button type="button" onClick={generateVariants} className="rounded-lg border px-3 py-2 text-sm">
-              Generate variant matrix ({matrixPreview.length})
-            </button>
-
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="px-2 py-2">SKU</th>
-                    <th className="px-2 py-2">Options</th>
-                    <th className="px-2 py-2">Price override</th>
-                    <th className="px-2 py-2">Stock</th>
-                    <th className="px-2 py-2">Threshold</th>
-                    <th className="px-2 py-2">Active</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {form.variants.map((v, idx) => (
-                    <tr key={v.id || v.sku || idx} className="border-t">
-                      <td className="px-2 py-1">
-                        <input
-                          className="w-40 rounded border px-2 py-1"
-                          value={v.sku}
-                          onChange={(e) => {
-                            const variants = [...form.variants]
-                            variants[idx] = { ...v, sku: e.target.value }
-                            setForm((f) => ({ ...f, variants }))
-                          }}
-                        />
-                      </td>
-                      <td className="px-2 py-1 text-xs">
-                        {v.option1Name}: {v.option1Value}
-                        {v.option2Value ? ` / ${v.option2Name}: ${v.option2Value}` : ''}
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="number"
-                          className="w-24 rounded border px-2 py-1"
-                          value={v.priceOverride ?? ''}
-                          onChange={(e) => {
-                            const variants = [...form.variants]
-                            variants[idx] = {
-                              ...v,
-                              priceOverride: e.target.value === '' ? null : Number(e.target.value),
-                            }
-                            setForm((f) => ({ ...f, variants }))
-                          }}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="number"
-                          className="w-20 rounded border px-2 py-1"
-                          value={v.stockQty ?? 0}
-                          disabled={Boolean(v.id)}
-                          title={v.id ? 'Use Inventory to change stock' : ''}
-                          onChange={(e) => {
-                            const variants = [...form.variants]
-                            variants[idx] = { ...v, stockQty: Number(e.target.value) }
-                            setForm((f) => ({ ...f, variants }))
-                          }}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="number"
-                          className="w-20 rounded border px-2 py-1"
-                          value={v.lowStockThreshold ?? 5}
-                          onChange={(e) => {
-                            const variants = [...form.variants]
-                            variants[idx] = { ...v, lowStockThreshold: Number(e.target.value) }
-                            setForm((f) => ({ ...f, variants }))
-                          }}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="checkbox"
-                          checked={v.isActive !== false}
-                          onChange={(e) => {
-                            const variants = [...form.variants]
-                            variants[idx] = { ...v, isActive: e.target.checked }
-                            setForm((f) => ({ ...f, variants }))
-                          }}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {tab === 4 && (
-          <label className="flex max-w-lg items-start gap-3 rounded-lg border p-4 text-sm">
-            <input
-              type="checkbox"
-              checked={form.visibleIndividually}
-              onChange={(e) => setForm((f) => ({ ...f, visibleIndividually: e.target.checked }))}
-            />
-            <span>
-              <strong>Visible as individual product</strong>
-              <br />
-              When unchecked, students never see this as a single item after kit stage.
-            </span>
-          </label>
-        )}
-      </form>
-    </div>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Stack>
+    </>
   )
 }

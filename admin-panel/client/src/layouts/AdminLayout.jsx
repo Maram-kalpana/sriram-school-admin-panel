@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   AppBar,
@@ -29,6 +29,7 @@ import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import { useAuth } from '../context/AuthContext'
 import { useSnackbar } from '../context/SnackbarContext'
+import api from '../api/client'
 
 const DRAWER_WIDTH = 260
 
@@ -51,15 +52,23 @@ function pathTitle(pathname) {
   return item?.label || 'Admin'
 }
 
-export default function AdminLayout({ badges = {} }) {
+export default function AdminLayout() {
   const theme = useTheme()
   const isDesktop = useMediaQuery(theme.breakpoints.up('lg'))
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [badges, setBadges] = useState({})
   const { admin, logout } = useAuth()
   const { showToast } = useSnackbar()
   const navigate = useNavigate()
   const location = useLocation()
   const title = useMemo(() => pathTitle(location.pathname), [location.pathname])
+
+  useEffect(() => {
+    api
+      .get('/admin/orders/counts')
+      .then((r) => setBadges({ newOrders: r.data.data.counts?.placed || 0 }))
+      .catch(() => {})
+  }, [location.pathname])
 
   async function handleLogout() {
     await logout()

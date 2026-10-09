@@ -3,6 +3,7 @@ const XLSX = require('xlsx');
 const db = require('../config/db');
 const AppError = require('../utils/AppError');
 const stockService = require('../services/stock');
+const { assignInvoiceIfNeeded } = require('../utils/invoiceNumber');
 
 function mapOrder(row) {
   return {
@@ -25,9 +26,37 @@ function mapOrder(row) {
       : row.address_snapshot,
     notes: row.notes,
     itemCount: Number(row.item_count || 0),
+    phone: row.phone || null,
+    email: row.email || null,
+    txnId: row.txn_id || null,
+    invoiceNumber: row.invoice_number || null,
+    trackingNumber: row.tracking_number || '',
+    courier: row.courier || '',
+    trackingUrl: row.tracking_url || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+async function counts(req, res, next) {
+  try {
+    const rows = await db('orders').select('status').count({ c: '*' }).groupBy('status');
+    const map = {
+      placed: 0,
+      confirmed: 0,
+      packed: 0,
+      shipped: 0,
+      delivered: 0,
+      cancelled: 0,
+      returned: 0,
+    };
+    rows.forEach((r) => {
+      map[r.status] = Number(r.c);
+    });
+    res.json({ success: true, data: { counts: map } });
+  } catch (err) {
+    next(err);
+  }
 }
 
 async function listOrders(req, res, next) {
@@ -53,9 +82,11 @@ async function listOrders(req, res, next) {
         's.admission_number',
         's.student_name',
         's.house_color',
-        db.raw('COUNT(oi.id) as item_count')
+        's.phone',
+        db.raw('COUNT(oi.id) as item_count'),
+        db.raw('(SELECT t.txn_id FROM payment_transactions t WHERE t.order_id = o.id ORDER BY t.id DESC LIMIT 1) as txn_id')
       )
-      .groupBy('o.id', 's.admission_number', 's.student_name', 's.house_color');
+      .groupBy('o.id', 's.admission_number', 's.student_name', 's.house_color', 's.phone');
 
     if (q.search) {
       const s = `%${q.search}%`;
@@ -110,6 +141,23 @@ async function getOrder(req, res, next) {
     const history = await db('order_status_history')
       .where({ order_id: row.id })
       .orderBy('created_at', 'asc');
+    let payment = null;
+    try {
+      const p = await db('payment_transactions').where({ order_id: row.id }).orderBy('id', 'desc').first();
+      if (p) {
+        payment = {
+          paytmOrderId: p.paytm_order_id,
+          txnId: p.txn_id,
+          bankTxnId: p.bank_txn_id,
+          status: p.status,
+          paymentMode: p.payment_mode,
+          respMsg: p.resp_msg,
+          amount: Number(p.amount),
+        };
+      }
+    } catch {
+      payment = null;
+    }
 
     res.json({
       success: true,
@@ -126,7 +174,10 @@ async function getOrder(req, res, next) {
           unitPrice: Number(i.unit_price),
           quantity: i.quantity,
           lineTotal: Number(i.line_total),
+          hsnCode: i.hsn_code,
+          gstRate: i.gst_rate != null ? Number(i.gst_rate) : null,
         })),
+        payment,
         history: history.map((h) => ({
           id: h.id,
           status: h.status,
@@ -165,20 +216,27 @@ async function updateStatus(req, res, next) {
         !['cancelled', 'returned'].includes(order.status)
       ) {
         const items = await trx('order_items').where({ order_id: order.id });
-        for (const item of items) {
-          await stockService.changeStock(trx, {
-            variantId: item.variant_id,
-            changeQty: item.quantity,
-            reason: body.status === 'cancelled' ? 'cancel' : 'return',
-            orderId: order.id,
-            adminUserId: req.admin.id,
-            note: body.note || `Order ${body.status}`,
-          });
-        }
+        await stockService.restockOrderItems(trx, {
+          order,
+          items,
+          reason: body.status === 'cancelled' ? 'cancel' : 'return',
+          adminUserId: req.admin.id,
+          note: body.note || `Order ${body.status}`,
+        });
+      }
+
+      if (body.status === 'confirmed') {
+        await assignInvoiceIfNeeded(trx, order);
       }
 
       await trx('orders').where({ id: order.id }).update({
         status: body.status,
+        stock_state:
+          body.status === 'cancelled' || body.status === 'returned'
+            ? order.stock_state === 'reserved'
+              ? 'released'
+              : order.stock_state
+            : order.stock_state,
         updated_at: trx.fn.now(),
       });
       await trx('order_status_history').insert({
@@ -238,16 +296,13 @@ async function bulkStatus(req, res, next) {
           !['cancelled', 'returned'].includes(order.status)
         ) {
           const items = await trx('order_items').where({ order_id: id });
-          for (const item of items) {
-            await stockService.changeStock(trx, {
-              variantId: item.variant_id,
-              changeQty: item.quantity,
-              reason: body.status === 'cancelled' ? 'cancel' : 'return',
-              orderId: id,
-              adminUserId: req.admin.id,
-              note: body.note || `Bulk ${body.status}`,
-            });
-          }
+          await stockService.restockOrderItems(trx, {
+            order,
+            items,
+            reason: body.status === 'cancelled' ? 'cancel' : 'return',
+            adminUserId: req.admin.id,
+            note: body.note || `Bulk ${body.status}`,
+          });
         }
         await trx('orders').where({ id }).update({ status: body.status, updated_at: trx.fn.now() });
         await trx('order_status_history').insert({
@@ -339,11 +394,35 @@ async function pickList(req, res, next) {
   }
 }
 
+async function updateShipping(req, res, next) {
+  try {
+    const schema = z.object({
+      trackingNumber: z.string().optional().default(''),
+      courier: z.string().optional().default(''),
+      trackingUrl: z.string().optional().default(''),
+    });
+    const body = schema.parse(req.body);
+    const order = await db('orders').where({ id: req.params.id }).first();
+    if (!order) throw new AppError('Order not found', 404);
+    await db('orders').where({ id: order.id }).update({
+      tracking_number: body.trackingNumber || null,
+      courier: body.courier || null,
+      tracking_url: body.trackingUrl || null,
+      updated_at: db.fn.now(),
+    });
+    res.json({ success: true, message: 'Shipping saved' });
+  } catch (err) {
+    next(err.name === 'ZodError' ? new AppError('Validation failed', 400, err.issues) : err);
+  }
+}
+
 module.exports = {
   listOrders,
+  counts,
   getOrder,
   updateStatus,
   updatePayment,
+  updateShipping,
   bulkStatus,
   exportOrders,
   pickList,

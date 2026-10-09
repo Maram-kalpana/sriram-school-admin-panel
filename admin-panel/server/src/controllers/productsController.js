@@ -13,6 +13,10 @@ const productBodySchema = z.object({
   basePrice: z.coerce.number().nonnegative(),
   compareAtPrice: z.coerce.number().nonnegative().nullable().optional(),
   taxPercent: z.coerce.number().min(0).max(100).optional().default(0),
+  hsnCode: z.string().max(16).nullable().optional(),
+  gstRate: z.coerce.number().min(0).max(28).optional(),
+  priceIncludesGst: z.boolean().optional().default(true),
+  includeInKit: z.boolean().optional().default(true),
   status: z.enum(['draft', 'active', 'archived']).optional().default('draft'),
   visibleIndividually: z.boolean().optional().default(true),
   variants: z
@@ -47,9 +51,17 @@ function mapProduct(row, extras = {}) {
     brand: row.brand,
     basePrice: Number(row.base_price),
     compareAtPrice: row.compare_at_price != null ? Number(row.compare_at_price) : null,
-    taxPercent: Number(row.tax_percent),
+    taxPercent: Number(row.gst_rate != null ? row.gst_rate : row.tax_percent),
+    hsnCode: row.hsn_code || null,
+    gstRate: Number(row.gst_rate != null ? row.gst_rate : row.tax_percent || 0),
+    priceIncludesGst: row.price_includes_gst == null ? true : Boolean(row.price_includes_gst),
+    includeInKit: row.include_in_kit == null ? true : Boolean(row.include_in_kit),
     status: row.status,
     visibleIndividually: Boolean(row.visible_individually),
+    sku: row.sku || extras.sku || null,
+    minPrice: row.min_price != null ? Number(row.min_price) : Number(row.base_price),
+    maxPrice: row.max_price != null ? Number(row.max_price) : Number(row.base_price),
+    stockStatus: extras.stockStatus || row.stock_status || null,
     primaryImage: row.primary_image || extras.primaryImage || null,
     totalStock: Number(row.total_stock || extras.totalStock || 0),
     variantCount: Number(row.variant_count || extras.variantCount || 0),
@@ -94,7 +106,7 @@ async function listProducts(req, res, next) {
       search: z.string().optional().default(''),
       categoryId: z.string().optional().default(''),
       status: z.enum(['draft', 'active', 'archived', '']).optional().default(''),
-      stockFilter: z.enum(['', 'low', 'out']).optional().default(''),
+      stockFilter: z.enum(['', 'in', 'low', 'out']).optional().default(''),
     });
     const q = schema.parse(req.query);
 
@@ -109,13 +121,18 @@ async function listProducts(req, res, next) {
         'c.name as category_name',
         db.raw('COALESCE(SUM(v.stock_qty), 0) as total_stock'),
         db.raw('COUNT(DISTINCT v.id) as variant_count'),
-        db.raw('MAX(pi.url) as primary_image')
+        db.raw('MAX(pi.url) as primary_image'),
+        db.raw('MIN(v.sku) as sku'),
+        db.raw('MIN(COALESCE(v.price_override, p.base_price)) as min_price'),
+        db.raw('MAX(COALESCE(v.price_override, p.base_price)) as max_price')
       )
       .groupBy('p.id', 'c.name');
 
     if (q.search) {
       const s = `%${q.search}%`;
-      query = query.andWhere((b) => b.where('p.name', 'like', s).orWhere('p.slug', 'like', s));
+      query = query.andWhere((b) =>
+        b.where('p.name', 'like', s).orWhere('p.slug', 'like', s).orWhere('v.sku', 'like', s)
+      );
     }
     if (q.categoryId) query = query.andWhere('p.category_id', q.categoryId);
     if (q.status) query = query.andWhere('p.status', q.status);
@@ -125,6 +142,10 @@ async function listProducts(req, res, next) {
     } else if (q.stockFilter === 'low') {
       query = query.havingRaw(
         'COALESCE(SUM(v.stock_qty), 0) > 0 AND COALESCE(SUM(v.stock_qty), 0) <= COALESCE(MIN(v.low_stock_threshold), 5)'
+      );
+    } else if (q.stockFilter === 'in') {
+      query = query.havingRaw(
+        'COALESCE(SUM(v.stock_qty), 0) > COALESCE(MIN(v.low_stock_threshold), 5)'
       );
     }
 
@@ -141,7 +162,14 @@ async function listProducts(req, res, next) {
     res.json({
       success: true,
       data: {
-        items: rows.map((r) => mapProduct(r)),
+        items: rows.map((r) => {
+          const total = Number(r.total_stock || 0);
+          const lowAt = Number(r.low_stock_threshold || 5);
+          let stockStatus = 'in stock';
+          if (total <= 0) stockStatus = 'out';
+          else if (total <= lowAt) stockStatus = 'low';
+          return mapProduct(r, { stockStatus });
+        }),
         pagination: {
           page: q.page,
           pageSize: q.pageSize,
@@ -166,13 +194,40 @@ async function getProduct(req, res, next) {
 
     const images = await db('product_images').where({ product_id: row.id }).orderBy('sort_order');
     const variants = await db('product_variants').where({ product_id: row.id }).orderBy('id');
+    const movements = await db('stock_movements as m')
+      .join('product_variants as v', 'v.id', 'm.variant_id')
+      .where('v.product_id', row.id)
+      .select('m.*', 'v.sku')
+      .orderBy('m.created_at', 'desc')
+      .limit(50);
+    const salesRow = await db('order_items as oi')
+      .join('orders as o', 'o.id', 'oi.order_id')
+      .where('oi.product_id', row.id)
+      .whereNotIn('o.status', ['cancelled'])
+      .countDistinct({ orders: 'o.id' })
+      .sum({ qty: 'oi.quantity' })
+      .sum({ revenue: 'oi.line_total' })
+      .first();
 
     res.json({
       success: true,
       data: {
-        product: mapProduct(row),
+        product: mapProduct(row, { sku: variants[0]?.sku }),
         images: images.map(mapImage),
         variants: variants.map(mapVariant),
+        movements: movements.map((m) => ({
+          id: m.id,
+          sku: m.sku,
+          changeQty: m.change_qty,
+          reason: m.reason,
+          note: m.note,
+          createdAt: m.created_at,
+        })),
+        sales: {
+          orders: Number(salesRow?.orders || 0),
+          qty: Number(salesRow?.qty || 0),
+          revenue: Number(salesRow?.revenue || 0),
+        },
       },
     });
   } catch (err) {
@@ -210,7 +265,11 @@ async function createProduct(req, res, next) {
         brand: body.brand || '',
         base_price: body.basePrice,
         compare_at_price: body.compareAtPrice ?? null,
-        tax_percent: body.taxPercent,
+        tax_percent: body.gstRate ?? body.taxPercent,
+        gst_rate: body.gstRate ?? body.taxPercent ?? 0,
+        hsn_code: body.hsnCode || null,
+        price_includes_gst: body.priceIncludesGst !== false,
+        include_in_kit: body.includeInKit !== false,
         status: body.status,
         visible_individually: body.visibleIndividually,
       });
@@ -267,6 +326,13 @@ async function updateProduct(req, res, next) {
       if (body.basePrice !== undefined) patch.base_price = body.basePrice;
       if (body.compareAtPrice !== undefined) patch.compare_at_price = body.compareAtPrice;
       if (body.taxPercent !== undefined) patch.tax_percent = body.taxPercent;
+      if (body.gstRate !== undefined) {
+        patch.gst_rate = body.gstRate;
+        patch.tax_percent = body.gstRate;
+      }
+      if (body.hsnCode !== undefined) patch.hsn_code = body.hsnCode;
+      if (body.priceIncludesGst !== undefined) patch.price_includes_gst = body.priceIncludesGst;
+      if (body.includeInKit !== undefined) patch.include_in_kit = body.includeInKit;
       if (body.status !== undefined) patch.status = body.status;
       if (body.visibleIndividually !== undefined) patch.visible_individually = body.visibleIndividually;
 
@@ -398,6 +464,10 @@ async function duplicateProduct(req, res, next) {
         base_price: product.base_price,
         compare_at_price: product.compare_at_price,
         tax_percent: product.tax_percent,
+        gst_rate: product.gst_rate,
+        hsn_code: product.hsn_code,
+        price_includes_gst: product.price_includes_gst,
+        include_in_kit: product.include_in_kit,
         status: 'draft',
         visible_individually: product.visible_individually,
       });

@@ -10,6 +10,13 @@ exports.seed = async function seed(knex) {
   await knex('order_status_history').del();
   await knex('order_items').del();
   await knex('orders').del();
+  try {
+    await knex('payment_refunds').del();
+    await knex('payment_transactions').del();
+    await knex('gst_profile').del();
+  } catch {
+    /* tables may not exist on first seed before extra migrations */
+  }
   await knex('kit_items').del();
   await knex('kits').del();
   await knex('product_variants').del();
@@ -39,12 +46,48 @@ exports.seed = async function seed(knex) {
     { setting_key: 'catalog_switch_rule', setting_value: JSON.stringify('after_kit_order') },
     { setting_key: 'extra_login_check', setting_value: JSON.stringify('none') },
     { setting_key: 'allow_kit_reorder', setting_value: JSON.stringify(false) },
+    { setting_key: 'allow_student_edit_address', setting_value: JSON.stringify(false) },
+    { setting_key: 'low_stock_default_threshold', setting_value: JSON.stringify(5) },
     { setting_key: 'shipping_fee', setting_value: JSON.stringify(0) },
+    { setting_key: 'free_shipping_threshold', setting_value: JSON.stringify(null) },
     { setting_key: 'school_name', setting_value: JSON.stringify('Scholar Store') },
     { setting_key: 'school_logo', setting_value: JSON.stringify(null) },
+    { setting_key: 'contact_email', setting_value: JSON.stringify('admin@scholarstore.local') },
+    { setting_key: 'contact_phone', setting_value: JSON.stringify('') },
     { setting_key: 'order_number_prefix', setting_value: JSON.stringify('SS') },
+    { setting_key: 'paytm_enabled', setting_value: JSON.stringify(false) },
+    { setting_key: 'paytm_environment', setting_value: JSON.stringify('staging') },
+    { setting_key: 'paytm_mid', setting_value: JSON.stringify('') },
+    { setting_key: 'paytm_merchant_key', setting_value: JSON.stringify('') },
+    { setting_key: 'paytm_website', setting_value: JSON.stringify('WEBSTAGING') },
+    { setting_key: 'paytm_industry_type', setting_value: JSON.stringify('Retail') },
+    { setting_key: 'paytm_channel_id', setting_value: JSON.stringify('WEB') },
+    {
+      setting_key: 'payment_methods',
+      setting_value: JSON.stringify([
+        { id: 'paytm', label: 'Paytm', enabled: false },
+        { id: 'cod', label: 'Cash on Delivery / Pay at school', enabled: true },
+      ]),
+    },
+    { setting_key: 'gst_email_timezone', setting_value: JSON.stringify('Asia/Kolkata') },
   ];
   await knex('settings').insert(settings);
+
+  try {
+    await knex('gst_profile').insert({
+      legal_name: 'Scholar Store',
+      gstin: '36AABCU9603R1ZX',
+      address: '12-3-45, Near School Gate, Banjara Hills',
+      city: 'Hyderabad',
+      state: 'Telangana',
+      state_code: '36',
+      pincode: '500034',
+      email: 'admin@scholarstore.local',
+      phone: '04000000000',
+    });
+  } catch {
+    /* gst_profile exists after GST migration */
+  }
 
   const categoryRows = [
     { name: 'Uniforms', slug: 'uniforms', sort_order: 1, is_active: true },
@@ -68,6 +111,8 @@ exports.seed = async function seed(knex) {
       base_price: 450,
       compare_at_price: 550,
       tax_percent: 5,
+      hsn_code: '6105',
+      gst_rate: 5,
       description: 'White cotton school shirt with school crest.',
       option1: { name: 'Size', values: sizes },
       option2: { name: 'Color', values: houseColors },
@@ -79,7 +124,9 @@ exports.seed = async function seed(knex) {
       category: 'uniforms',
       brand: 'ScholarWear',
       base_price: 550,
-      tax_percent: 5,
+      tax_percent: 12,
+      hsn_code: '6203',
+      gst_rate: 12,
       description: 'Navy blue formal school trousers.',
       option1: { name: 'Size', values: sizes },
       stock: 30,
@@ -91,6 +138,8 @@ exports.seed = async function seed(knex) {
       brand: 'ScholarWear',
       base_price: 350,
       tax_percent: 5,
+      hsn_code: '6109',
+      gst_rate: 5,
       description: 'House-color sports T-shirt.',
       option1: { name: 'Size', values: sizes },
       option2: { name: 'Color', values: houseColors },
@@ -102,7 +151,9 @@ exports.seed = async function seed(knex) {
       category: 'sportswear',
       brand: 'ScholarWear',
       base_price: 300,
-      tax_percent: 5,
+      tax_percent: 12,
+      hsn_code: '6203',
+      gst_rate: 12,
       description: 'Comfortable sports shorts.',
       option1: { name: 'Size', values: sizes },
       stock: 40,
@@ -114,6 +165,8 @@ exports.seed = async function seed(knex) {
       brand: 'ScholarWear',
       base_price: 150,
       tax_percent: 5,
+      hsn_code: '6215',
+      gst_rate: 5,
       description: 'Official school tie.',
       option1: { name: 'Size', values: ['One Size'] },
       stock: 100,
@@ -124,7 +177,9 @@ exports.seed = async function seed(knex) {
       category: 'accessories',
       brand: 'ScholarWear',
       base_price: 120,
-      tax_percent: 5,
+      tax_percent: 12,
+      hsn_code: '4203',
+      gst_rate: 12,
       description: 'Black leatherette school belt.',
       option1: { name: 'Size', values: ['S', 'M', 'L'] },
       stock: 50,
@@ -136,6 +191,8 @@ exports.seed = async function seed(knex) {
       brand: 'ScholarWear',
       base_price: 80,
       tax_percent: 5,
+      hsn_code: '6115',
+      gst_rate: 5,
       description: 'White school socks, pack of 1 pair.',
       option1: { name: 'Size', values: ['S', 'M', 'L'] },
       stock: 80,
@@ -147,6 +204,8 @@ exports.seed = async function seed(knex) {
       brand: 'ScholarWear',
       base_price: 200,
       tax_percent: 5,
+      hsn_code: '6505',
+      gst_rate: 5,
       description: 'House-color school cap.',
       option1: { name: 'Size', values: ['One Size'] },
       option2: { name: 'Color', values: houseColors },
@@ -160,6 +219,8 @@ exports.seed = async function seed(knex) {
       base_price: 899,
       compare_at_price: 999,
       tax_percent: 12,
+      hsn_code: '6403',
+      gst_rate: 12,
       description: 'Black formal school shoes.',
       option1: { name: 'Size', values: ['3', '4', '5', '6', '7', '8'] },
       stock: 12,
@@ -171,7 +232,24 @@ exports.seed = async function seed(knex) {
       brand: 'ScholarStep',
       base_price: 799,
       tax_percent: 12,
+      hsn_code: '6404',
+      gst_rate: 12,
       description: 'Lightweight sports shoes for PE.',
+      option1: { name: 'Size', values: ['3', '4', '5', '6', '7', '8'] },
+      stock: 10,
+    },
+    {
+      name: 'School Bag',
+      slug: 'school-bag',
+      category: 'accessories',
+      brand: 'ScholarWear',
+      base_price: 799,
+      tax_percent: 18,
+      hsn_code: '4202',
+      gst_rate: 18,
+      description: 'Durable school backpack.',
+      option1: { name: 'Size', values: ['One Size'] },
+      stock: 20,
       option1: { name: 'Size', values: ['3', '4', '5', '6', '7', '8'] },
       stock: 10,
     },
@@ -189,6 +267,10 @@ exports.seed = async function seed(knex) {
       base_price: p.base_price,
       compare_at_price: p.compare_at_price || null,
       tax_percent: p.tax_percent,
+      hsn_code: p.hsn_code || null,
+      gst_rate: p.gst_rate != null ? p.gst_rate : p.tax_percent,
+      price_includes_gst: true,
+      include_in_kit: p.slug !== 'school-bag',
       status: 'active',
       visible_individually: true,
     });

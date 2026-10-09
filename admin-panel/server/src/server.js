@@ -14,6 +14,9 @@ async function start() {
     process.exit(1);
   }
 
+  const { startJobs } = require('./jobs/cron');
+  startJobs();
+
   app.listen(env.port, () => {
     console.log(`Admin API listening on http://localhost:${env.port}`);
   });

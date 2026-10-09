@@ -1,15 +1,40 @@
 import { useEffect, useState } from 'react'
-import toast from 'react-hot-toast'
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  FormControlLabel,
+  IconButton,
+  MenuItem,
+  Stack,
+  Switch,
+  TextField,
+  Typography,
+} from '@mui/material'
+import AddOutlinedIcon from '@mui/icons-material/AddOutlined'
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
+import PageHeader from '../components/PageHeader'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import EmptyState from '../components/EmptyState'
+import { useSnackbar } from '../context/SnackbarContext'
+import { formatINR } from '../utils/format'
 import { getKit, saveKit } from '../api/admin'
 import { listProducts } from '../api/catalog'
+import api from '../api/client'
 
 export default function Kit() {
-  const [kit, setKit] = useState({ name: 'School Kit', description: '', price: 2499, isActive: true })
+  const { showToast } = useSnackbar()
+  const [kit, setKit] = useState({ name: 'School Kit', description: '', price: 2499, isActive: true, imageUrl: null })
   const [items, setItems] = useState([])
   const [warnings, setWarnings] = useState([])
   const [products, setProducts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   async function load() {
+    setLoading(true)
     try {
       const [kitRes, prodRes] = await Promise.all([
         getKit(),
@@ -18,16 +43,21 @@ export default function Kit() {
       if (kitRes.data.kit) setKit(kitRes.data.kit)
       setItems(kitRes.data.items || [])
       setWarnings(kitRes.data.warnings || [])
-      setProducts(prodRes.data.items)
+      setProducts(prodRes.data.items || [])
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to load kit')
+      showToast(err.response?.data?.message || 'Failed to load kit', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+  }, [])
 
   async function onSave(e) {
     e.preventDefault()
+    setSaving(true)
     try {
       await saveKit({
         name: kit.name,
@@ -41,122 +71,227 @@ export default function Kit() {
           autoMatchHouseColor: Boolean(i.autoMatchHouseColor),
         })),
       })
-      toast.success('Kit saved')
+      showToast('Kit saved', 'success')
       load()
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Save failed')
+      showToast(err.response?.data?.message || 'Save failed', 'error')
+    } finally {
+      setSaving(false)
     }
   }
 
+  async function onUploadImage(file) {
+    if (!file) return
+    const form = new FormData()
+    form.append('image', file)
+    try {
+      const { data } = await api.post('/admin/kit/image', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setKit((k) => ({ ...k, imageUrl: data.data.imageUrl }))
+      showToast('Image uploaded', 'success')
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Upload failed', 'error')
+    }
+  }
+
+  if (loading) {
+    return (
+      <>
+        <PageHeader title="School Kit" subtitle="Bundle products offered as a kit to students." />
+        <LoadingSkeleton rows={8} />
+      </>
+    )
+  }
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Kit management</h1>
+    <>
+      <PageHeader
+        title="School Kit"
+        subtitle="Bundle products, set price, and size/house-color rules."
+        actions={
+          <Button variant="contained" disabled={saving} onClick={onSave}>
+            {saving ? 'Saving…' : 'Save kit'}
+          </Button>
+        }
+      />
+
       {warnings.length > 0 && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          <strong>Stock warning:</strong> some kit products have zero-stock variants —{' '}
-          {warnings.map((w) => w.productName).join(', ')}
-        </div>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Out-of-stock variants in kit: {warnings.map((w) => w.productName).join(', ')}
+        </Alert>
       )}
 
-      <form onSubmit={onSave} className="space-y-4 rounded-xl border bg-white p-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="text-sm">Name
-            <input className="mt-1 w-full rounded-lg border px-3 py-2" value={kit.name} onChange={(e) => setKit((k) => ({ ...k, name: e.target.value }))} />
-          </label>
-          <label className="text-sm">Bundle price
-            <input type="number" className="mt-1 w-full rounded-lg border px-3 py-2" value={kit.price} onChange={(e) => setKit((k) => ({ ...k, price: e.target.value }))} />
-          </label>
-        </div>
-        <label className="block text-sm">Description
-          <textarea className="mt-1 w-full rounded-lg border px-3 py-2" rows={3} value={kit.description || ''} onChange={(e) => setKit((k) => ({ ...k, description: e.target.value }))} />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={kit.isActive} onChange={(e) => setKit((k) => ({ ...k, isActive: e.target.checked }))} />
-          Active
-        </label>
+      <Box component="form" onSubmit={onSave}>
+        <Stack spacing={2}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography fontWeight={600} sx={{ mb: 2 }}>Kit details</Typography>
+              <Stack spacing={2}>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <TextField
+                    label="Name"
+                    fullWidth
+                    required
+                    value={kit.name}
+                    onChange={(e) => setKit((k) => ({ ...k, name: e.target.value }))}
+                  />
+                  <TextField
+                    label="Bundle price (₹)"
+                    type="number"
+                    fullWidth
+                    required
+                    value={kit.price}
+                    onChange={(e) => setKit((k) => ({ ...k, price: e.target.value }))}
+                    helperText={formatINR(kit.price)}
+                  />
+                </Stack>
+                <TextField
+                  label="Description"
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  value={kit.description || ''}
+                  onChange={(e) => setKit((k) => ({ ...k, description: e.target.value }))}
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={kit.isActive}
+                      onChange={(e) => setKit((k) => ({ ...k, isActive: e.target.checked }))}
+                    />
+                  }
+                  label="Active"
+                />
+                <Stack direction="row" spacing={2} alignItems="center">
+                  {kit.imageUrl && (
+                    <Box
+                      component="img"
+                      src={kit.imageUrl}
+                      alt="Kit"
+                      sx={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}
+                    />
+                  )}
+                  <Button variant="outlined" component="label">
+                    Upload image
+                    <input hidden type="file" accept="image/*" onChange={(e) => onUploadImage(e.target.files?.[0])} />
+                  </Button>
+                </Stack>
+              </Stack>
+            </CardContent>
+          </Card>
 
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-semibold">Kit items</h2>
-            <button
-              type="button"
-              className="rounded-lg border px-3 py-1.5 text-sm"
-              onClick={() => {
-                if (!products[0]) return
-                setItems((list) => [
-                  ...list,
-                  {
-                    productId: products[0].id,
-                    productName: products[0].name,
-                    quantity: 1,
-                    studentPicksSize: true,
-                    autoMatchHouseColor: false,
-                  },
-                ])
-              }}
-            >
-              Add product
-            </button>
-          </div>
-          <div className="space-y-2">
-            {items.map((item, idx) => (
-              <div key={idx} className="grid gap-2 rounded-lg border p-3 sm:grid-cols-5">
-                <select
-                  className="rounded border px-2 py-1 text-sm sm:col-span-2"
-                  value={item.productId}
-                  onChange={(e) => {
-                    const p = products.find((x) => String(x.id) === e.target.value)
-                    const next = [...items]
-                    next[idx] = { ...item, productId: Number(e.target.value), productName: p?.name }
-                    setItems(next)
+          <Card variant="outlined">
+            <CardContent>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Typography fontWeight={600}>Kit items</Typography>
+                <Button
+                  startIcon={<AddOutlinedIcon />}
+                  size="small"
+                  disabled={!products.length}
+                  onClick={() => {
+                    if (!products[0]) return
+                    setItems((list) => [
+                      ...list,
+                      {
+                        productId: products[0].id,
+                        productName: products[0].name,
+                        quantity: 1,
+                        studentPicksSize: true,
+                        autoMatchHouseColor: false,
+                      },
+                    ])
                   }}
                 >
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  className="rounded border px-2 py-1 text-sm"
-                  value={item.quantity}
-                  onChange={(e) => {
-                    const next = [...items]
-                    next[idx] = { ...item, quantity: Number(e.target.value) }
-                    setItems(next)
-                  }}
-                />
-                <label className="flex items-center gap-1 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={item.studentPicksSize}
-                    onChange={(e) => {
-                      const next = [...items]
-                      next[idx] = { ...item, studentPicksSize: e.target.checked }
-                      setItems(next)
-                    }}
-                  />
-                  Picks size
-                </label>
-                <label className="flex items-center gap-1 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={item.autoMatchHouseColor}
-                    onChange={(e) => {
-                      const next = [...items]
-                      next[idx] = { ...item, autoMatchHouseColor: e.target.checked }
-                      setItems(next)
-                    }}
-                  />
-                  Auto house color
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
+                  Add product
+                </Button>
+              </Stack>
 
-        <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Save kit</button>
-      </form>
-    </div>
+              {!items.length && (
+                <EmptyState title="No kit items" description="Add products that belong in the school kit." />
+              )}
+
+              <Stack spacing={1.5}>
+                {items.map((item, idx) => (
+                  <Stack
+                    key={idx}
+                    direction={{ xs: 'column', md: 'row' }}
+                    spacing={1.5}
+                    alignItems={{ md: 'center' }}
+                    sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}
+                  >
+                    <TextField
+                      select
+                      size="small"
+                      label="Product"
+                      value={item.productId}
+                      sx={{ flex: 2, minWidth: 180 }}
+                      onChange={(e) => {
+                        const p = products.find((x) => String(x.id) === e.target.value)
+                        const next = [...items]
+                        next[idx] = { ...item, productId: Number(e.target.value), productName: p?.name }
+                        setItems(next)
+                      }}
+                    >
+                      {products.map((p) => (
+                        <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="Qty"
+                      value={item.quantity}
+                      sx={{ width: 100 }}
+                      inputProps={{ min: 1 }}
+                      onChange={(e) => {
+                        const next = [...items]
+                        next[idx] = { ...item, quantity: Number(e.target.value) }
+                        setItems(next)
+                      }}
+                    />
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          size="small"
+                          checked={item.studentPicksSize}
+                          onChange={(e) => {
+                            const next = [...items]
+                            next[idx] = { ...item, studentPicksSize: e.target.checked }
+                            setItems(next)
+                          }}
+                        />
+                      }
+                      label="Student picks size"
+                    />
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          size="small"
+                          checked={item.autoMatchHouseColor}
+                          onChange={(e) => {
+                            const next = [...items]
+                            next[idx] = { ...item, autoMatchHouseColor: e.target.checked }
+                            setItems(next)
+                          }}
+                        />
+                      }
+                      label="Auto-match house color"
+                    />
+                    <IconButton
+                      color="error"
+                      onClick={() => setItems((list) => list.filter((_, i) => i !== idx))}
+                      aria-label="Remove item"
+                    >
+                      <DeleteOutlinedIcon />
+                    </IconButton>
+                  </Stack>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Stack>
+      </Box>
+    </>
   )
 }

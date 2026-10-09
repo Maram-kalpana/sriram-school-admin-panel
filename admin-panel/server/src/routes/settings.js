@@ -8,5 +8,6 @@ router.get('/', settingsController.getSettings);
 router.put('/', settingsController.updateSettings);
 router.post('/logo', diskUpload.single('logo'), settingsController.uploadLogo);
 router.post('/test-email', settingsController.sendTestEmail);
+router.post('/paytm/test', settingsController.testPaytm);
 
 module.exports = router;
